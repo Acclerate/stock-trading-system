@@ -1,48 +1,57 @@
 import pandas as pd
-import pandas_ta as ta
+import talib
 import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
 from data_resilient import DataResilient
 from cache_manager import CacheManager
+import sys
+import io
+
+# 修复 Windows 中文乱码
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # ========== 数据获取模块 ==========
 def fetch_stock_data(symbol, start_date, end_date):
     """通过AKShare获取股票历史数据（日线）- 带缓存和重试"""
     return DataResilient.fetch_stock_data(symbol, start_date, end_date, use_cache=True)
 
-# ========== 指标计算模块（使用 pandas_ta）==========
+# ========== 指标计算模块（使用 TA-Lib）==========
 def calculate_indicators(df):
     """计算技术指标：均线、MACD、RSI、BOLL、成交量"""
+    # 确保数据是 numpy 数组格式（TA-Lib 要求）
+    close = df['close'].values
+    high = df['high'].values
+    low = df['low'].values
+    volume = df['volume'].values
+
     # 均线 (5日, 20日)
-    df['ma5'] = df.ta.sma(length=5)
-    df['ma20'] = df.ta.sma(length=20)
-    
+    df['ma5'] = talib.SMA(close, timeperiod=5)
+    df['ma20'] = talib.SMA(close, timeperiod=20)
+
     # MACD (默认参数：fast=12, slow=26, signal=9)
-    macd = df.ta.macd(fast=12, slow=26, signal=9)
-    df = pd.concat([df, macd], axis=1)
-    
+    # 返回值：macd, signal, hist
+    macd, macd_signal, macd_hist = talib.MACD(close, fastperiod=12, slowperiod=26, signalperiod=9)
+    df['macd'] = macd
+    df['macd_signal'] = macd_signal
+    df['macd_hist'] = macd_hist
+
     # RSI (14日)
-    df['rsi'] = df.ta.rsi(length=14)
-    
-    # BOLL (20日)
-    boll = df.ta.bbands(length=20)
-    df = pd.concat([df, boll], axis=1)
-    
+    df['rsi'] = talib.RSI(close, timeperiod=14)
+
+    # BOLL (20日, 2倍标准差)
+    # 返回值：upper, middle, lower
+    boll_upper, boll_mid, boll_lower = talib.BBANDS(close, timeperiod=20, nbdevup=2, nbdevdn=2)
+    df['boll_upper'] = boll_upper
+    df['boll_mid'] = boll_mid
+    df['boll_lower'] = boll_lower
+
     # 成交量变化率（3日平均）
     df['volume_ma3'] = df['volume'].rolling(window=3).mean()
     df['volume_pct_change'] = (df['volume'] / df['volume_ma3'].shift(1)) - 1
-    
-    # 清理列名
-    df.rename(columns={
-        'MACD_12_26_9': 'macd',
-        'MACDs_12_26_9': 'macd_signal',
-        'MACDh_12_26_9': 'macd_hist',
-        'BBL_20_2.0': 'boll_lower',
-        'BBM_20_2.0': 'boll_mid',
-        'BBU_20_2.0': 'boll_upper'
-    }, inplace=True)
-    
+
     return df
 
 # ========== 信号生成模块 ==========

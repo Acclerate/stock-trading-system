@@ -1,14 +1,37 @@
-stock_grain_ranking/__pycache__/backtest.cpython-39.pyc
-stock_grain_ranking/__pycache__/data.cpython-39.pyc
-stock_grain_ranking/__pycache__/indicators.cpython-39.pyc
-stock_grain_ranking/__pycache__/signals.cpython-39.pyc
-stock_grain_ranking/__pycache__/stockRanking.cpython-39.pyc
-stock_pre_ranking/__pycache__/backtest.cpython-39.pyc
-stock_pre_ranking/__pycache__/data.cpython-39.pyc
-stock_pre_ranking/__pycache__/indicators.cpython-39.pyc
-stock_pre_ranking/__pycache__/signals.cpython-39.pyc
-__pycache__/stockPre.cpython-39.pyc
-__pycache__/stockRanking.cpython-39.pyc
-stock_grain_ranking/__pycache__/main.cpython-39.pyc
-stock_pre_ranking/__pycache__/main.cpython-39.pyc
-.trae/documents/plan_20260207_040244.md
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific
+stock_grain_ranking/__pycache__/
+stock_pre_ranking/__pycache__/
+tmpclaude-*-cwd
+.trae/
+
+# Sensitive configuration - DO NOT COMMIT
+config_data_source.py
+
+# Documents
+下周一操作计划.md
+专业交易监控系统.md
+金风科技交易分析报告.md
+
+# Cache
+cache/*.pkl
+
+# Test files
+test_*.py
