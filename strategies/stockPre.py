@@ -3,8 +3,8 @@ import talib
 import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
-from data_resilient import DataResilient
-from cache_manager import CacheManager
+from data.data_resilient import DataResilient
+from data.cache_manager import CacheManager
 import sys
 import io
 

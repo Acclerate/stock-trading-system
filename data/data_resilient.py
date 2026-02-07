@@ -8,7 +8,7 @@ import time
 import random
 import os
 from datetime import datetime
-from cache_manager import CacheManager
+from .cache_manager import CacheManager
 from config_data_source import DATA_SOURCE_CONFIG, get_enabled_sources
 
 # 强制禁用所有代理（解决 Connection aborted 问题）

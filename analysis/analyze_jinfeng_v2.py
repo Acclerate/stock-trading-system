@@ -5,7 +5,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from data_sources import MultiSourceDataFetcher
+from data.data_sources import MultiSourceDataFetcher
 
 def calculate_ma(series, period):
     """计算均线"""

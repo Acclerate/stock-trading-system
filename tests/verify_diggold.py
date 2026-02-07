@@ -7,7 +7,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-from data_resilient import DIGGOLD_AVAILABLE, DIGGOLD_TOKEN
+from data.data_resilient import DIGGOLD_AVAILABLE, DIGGOLD_TOKEN
 from config_data_source import get_enabled_sources, DATA_SOURCE_CONFIG
 
 print("=" * 60)

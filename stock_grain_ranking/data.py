@@ -3,8 +3,8 @@ import sys
 import os
 import akshare as ak
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_resilient import DataResilient
-from cache_manager import CacheManager
+from data.data_resilient import DataResilient
+from data.cache_manager import CacheManager
 from datetime import datetime, timedelta
 
 class DataFetcher:
