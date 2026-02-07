@@ -3,15 +3,14 @@ import talib
 import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
+import sys
+import os
+
+# 添加项目根目录到Python路径，以便导入data模块
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data.data_resilient import DataResilient
 from data.cache_manager import CacheManager
-import sys
-import io
-
-# 修复 Windows 中文乱码
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # ========== 数据获取模块 ==========
 def fetch_stock_data(symbol, start_date, end_date):

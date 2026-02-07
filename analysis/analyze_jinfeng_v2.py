@@ -5,6 +5,12 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import sys
+import os
+
+# 添加项目根目录到Python路径，以便导入data模块
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from data.data_sources import MultiSourceDataFetcher
 
 def calculate_ma(series, period):
