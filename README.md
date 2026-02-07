@@ -79,7 +79,7 @@ cp config_data_source.py.example config_data_source.py
 
 2. 编辑 `config_data_source.py`，填入您的掘金Token：
 ```python
-'token': '30d9990c15bccdb36b0f23043ee1d39e886b62a3'  # 替换为您的Token
+'token': 'xxxxxxxxxxxxxxxx'  # 替换为您的Token
 ```
 
 ### 运行示例
