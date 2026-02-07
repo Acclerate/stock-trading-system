@@ -9,7 +9,7 @@ import random
 import os
 from datetime import datetime
 from .cache_manager import CacheManager
-from config_data_source import DATA_SOURCE_CONFIG, get_enabled_sources
+from data.config_data_source import DATA_SOURCE_CONFIG, get_enabled_sources
 
 # 强制禁用所有代理（解决 Connection aborted 问题）
 for key in list(os.environ.keys()):

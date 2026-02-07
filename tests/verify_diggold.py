@@ -6,7 +6,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.data_resilient import DIGGOLD_AVAILABLE, DIGGOLD_TOKEN
-from config_data_source import get_enabled_sources, DATA_SOURCE_CONFIG
+from data.config_data_source import get_enabled_sources, DATA_SOURCE_CONFIG
 
 print("=" * 60)
 print("数据源配置验证")

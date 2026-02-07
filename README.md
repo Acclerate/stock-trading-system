@@ -26,6 +26,17 @@
 
 ---
 
+## 📚 项目文档
+
+详细文档请查看 `docs/` 文件夹：
+
+- **[docs/README.md](docs/README.md)** - 文档索引
+- **[项目配置指南](docs/PROJECT_SETUP.md)** - 环境配置详解
+- **[数据源文档](docs/akshare_data_sources.md)** - 数据源使用说明
+- **[评估报告](docs/FINAL_EVALUATION_REPORT.md)** - 系统评估报告
+
+---
+
 ## 数据源说明
 
 ### 主要数据源：东财掘金SDK
@@ -165,20 +176,33 @@ python main.py -s 600489 601088 -b 20250207 -e 20260207
 
 ```
 stockScience/
-├── stockPre.py                      # StockPre系统
-├── stock_grain_ranking/
-│   ├── main.py                      # StockGrain系统
-│   ├── data.py                      # 数据获取模块
-│   ├── indicators.py                 # 技术指标计算
-│   ├── signals.py                    # 信号生成模块
-│   └── backtest.py                   # 回测模块
-├── cache_manager.py                 # 缓存管理模块
-├── data_resilient.py                # 数据获取模块（掘金SDK优先）
-├── config_data_source.py            # 数据源配置（含Token）
-├── config_data_source.py.example    # 配置文件模板
-├── diggold_data.py                  # 掘金SDK数据获取封装
+├── docs/                           # 项目文档
+│   ├── README.md                   # 文档索引
+│   ├── PROJECT_SETUP.md            # 配置指南
+│   ├── akshare_data_sources.md     # 数据源文档
+│   ├── FINAL_EVALUATION_REPORT.md  # 评估报告
+│   └── 专业交易监控系统.md          # 交易系统文档
+├── strategies/                      # 策略模块
+│   ├── stockPre.py                 # 沪深300筛选系统
+│   └── stockRanking.py             # 多维评分系统
+├── data/                           # 数据模块
+│   ├── data_resilient.py           # 数据获取（掘金SDK优先）
+│   ├── diggold_data.py             # 掘金SDK封装
+│   └── cache_manager.py            # 缓存管理
+├── stock_grain_ranking/            # 个股分析模块
+│   ├── main.py                     # 主程序
+│   ├── indicators.py               # 技术指标
+│   ├── signals.py                  # 信号生成
+│   └── backtest.py                 # 回测模块
+├── analysis/                       # 分析脚本
+├── utils/                          # 工具模块
+├── tests/                          # 测试脚本
 ├── cache/                          # 缓存目录
-├── requirements.txt                  # Python依赖
+├── .env                            # 环境变量（Token等）
+├── .env.example                    # 环境变量模板
+├── config_data_source.py           # 数据源配置
+├── requirements.txt                # Python依赖
+├── CLAUDE.md                       # Claude AI配置
 └── README.md                       # 本文件
 ```
 
