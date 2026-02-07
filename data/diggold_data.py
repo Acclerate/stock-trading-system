@@ -4,13 +4,13 @@
 """
 import pandas as pd
 import sys
-import io
+import os
 from datetime import datetime, timedelta
 
-# 修复 Windows 中文乱码
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config_data_source import DATA_SOURCE_CONFIG
 
 # 掘金SDK
 from gm.api import (
@@ -26,8 +26,8 @@ from gm.api import (
 class DiggoldDataSource:
     """东财掘金SDK数据源"""
 
-    # Token从用户配置页面获取
-    TOKEN = "30d9990c15bccdb36b0f23043ee1d39e886b62a3"
+    # Token从配置文件读取
+    TOKEN = DATA_SOURCE_CONFIG['sources']['diggold']['token']
 
     # 频率常量
     FREQ_TICK = 'tick'       # 逐笔
@@ -48,8 +48,9 @@ class DiggoldDataSource:
     def init():
         """初始化SDK"""
         try:
-            set_token(DiggoldDataSource.TOKEN)
-            print("掘金SDK初始化成功")
+            token = DATA_SOURCE_CONFIG['sources']['diggold']['token']
+            set_token(token)
+            print(f"掘金SDK初始化成功 (Token: {token[:16]}...)")
             return True
         except Exception as e:
             print(f"掘金SDK初始化失败: {e}")
@@ -82,9 +83,6 @@ class DiggoldDataSource:
             )
 
             if df and not data.empty:
-                # 打印原始列名用于调试
-                print(f"原始数据列: {list(data.columns)}")
-
                 # 处理日期列 - eob/bob 可能存在
                 date_col = None
                 if 'eob' in data.columns:

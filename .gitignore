@@ -30,6 +30,8 @@ tmpclaude-*-cwd
 
 # Sensitive configuration - DO NOT COMMIT
 config_data_source.py
+.env
+.env.local
 
 # Documents
 下周一操作计划.md
