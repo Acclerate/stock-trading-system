@@ -1,0 +1,122 @@
+"""
+数据源配置文件 - 示例模板
+管理项目中所有数据源的优先级和启用状态
+
+使用方法：
+1. 复制此文件为 config_data_source.py
+2. 填写您的东财掘金SDK Token
+3. 根据需要调整数据源配置
+"""
+
+# ========== 数据源配置 ==========
+DATA_SOURCE_CONFIG = {
+    # 默认数据源
+    'default': 'diggold',
+
+    # 数据源列表（按优先级排序）
+    'sources': {
+        'diggold': {
+            'name': '东财掘金SDK',
+            'enabled': True,
+            'priority': 1,  # 最高优先级
+            'description': '掘金量化终端SDK，通过专用协议获取数据，无需HTTP连接',
+            # 警告：请替换为您的个人Token，不要泄露！
+            'token': 'YOUR_DIGGOLD_TOKEN_HERE'  # 从 https://www.myquant.cn/ 获取
+        },
+        'akshare_primary': {
+            'name': 'AkShare主接口',
+            'enabled': False,  # 禁用（连接问题）
+            'priority': 2,
+            'description': '东方财富网数据源，通过HTTP接口获取'
+        },
+        'akshare_daily': {
+            'name': 'AkShare备用接口',
+            'enabled': False,  # 禁用（连接问题）
+            'priority': 3,
+            'description': '东方财富网备用数据接口'
+        },
+        'baostock': {
+            'name': 'Baostock证券宝',
+            'enabled': True,  # 启用作为备用
+            'priority': 4,
+            'description': '免费开源数据源，稳定可靠'
+        },
+        'efinance': {
+            'name': 'Efinance',
+            'enabled': False,  # 禁用（连接问题）
+            'priority': 5,
+            'description': '东方财富轻量级数据接口'
+        }
+    },
+
+    # 是否启用自动降级（当主数据源失败时自动切换）
+    'auto_fallback': True,
+
+    # 最大重试次数
+    'max_retries': 3,
+
+    # 重试延迟（秒）
+    'retry_delay': (0.5, 1.5)  # 最小值，最大值
+}
+
+
+def get_enabled_sources():
+    """获取所有启用的数据源，按优先级排序"""
+    enabled = []
+    for source_id, config in DATA_SOURCE_CONFIG['sources'].items():
+        if config['enabled']:
+            enabled.append((source_id, config))
+    # 按优先级排序（数字越小优先级越高）
+    enabled.sort(key=lambda x: x[1]['priority'])
+    return enabled
+
+
+def get_default_source():
+    """获取默认数据源"""
+    default = DATA_SOURCE_CONFIG['default']
+    if default in DATA_SOURCE_CONFIG['sources']:
+        return default, DATA_SOURCE_CONFIG['sources'][default]
+    return None, None
+
+
+def is_source_enabled(source_id: str) -> bool:
+    """检查数据源是否启用"""
+    if source_id in DATA_SOURCE_CONFIG['sources']:
+        return DATA_SOURCE_CONFIG['sources'][source_id]['enabled']
+    return False
+
+
+# ========== 使用说明 ==========
+"""
+数据源配置说明：
+
+1. 东财掘金SDK（推荐）
+   - 获取Token: 访问 https://www.myquant.cn/ 注册并获取Token
+   - 优势: 稳定可靠，专用协议，无需HTTP连接
+   - 配置: 将 YOUR_DIGGOLD_TOKEN_HERE 替换为您的Token
+
+2. Baostock（备用）
+   - 安装: pip install baostock
+   - 优势: 免费，无需注册，稳定可靠
+   - 限制: 数据可能有延迟
+
+3. AkShare（可选）
+   - 安装: pip install akshare
+   - 注意: 可能受网络环境影响
+
+配置选项：
+- enabled: True/False - 是否启用该数据源
+- priority: 1-10 - 优先级（数字越小越优先）
+- auto_fallback: True/False - 主数据源失败时是否自动切换到备用
+
+只使用掘金SDK（最稳定）：
+- 掘金SDK enabled=True
+- 其他数据源 enabled=False
+- auto_fallback=False
+
+掘金SDK为主，Baostock为备用（推荐）：
+- 掘金SDK enabled=True
+- Baostock enabled=True
+- 其他数据源 enabled=False
+- auto_fallback=True
+"""
