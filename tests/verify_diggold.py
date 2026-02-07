@@ -1,6 +1,12 @@
 """验证掘金SDK初始化状态"""
 import sys
 import os
+import io
+
+# 设置UTF-8编码输出（Windows兼容）
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # 添加项目根目录到Python路径，以便导入data模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

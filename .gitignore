@@ -29,7 +29,7 @@ tmpclaude-*-cwd
 .trae/
 
 # Sensitive configuration - DO NOT COMMIT
-config_data_source.py
+data/config_data_source.py
 .env
 .env.local
 
