@@ -31,6 +31,7 @@
 详细文档请查看 `docs/` 文件夹：
 
 - **[docs/README.md](docs/README.md)** - 文档索引
+- **[Python环境配置](docs/PYTHON_ENVIRONMENT.md)** - Anaconda Python环境设置
 - **[项目配置指南](docs/PROJECT_SETUP.md)** - 环境配置详解
 - **[数据源文档](docs/akshare_data_sources.md)** - 数据源使用说明
 - **[评估报告](docs/FINAL_EVALUATION_REPORT.md)** - 系统评估报告
@@ -70,35 +71,52 @@
 
 ### 环境要求
 
-- Python 3.9+
+- **Python**: 3.9+ (推荐使用Anaconda)
+- **Python路径**: `D:\ProgramData\anaconda3\python.exe` (Anaconda base环境)
 - 掘金SDK (gm 3.0+)
 - 东财掘金账号和 Token
 
 ### 安装依赖
 
-```bash
-pip install -r requirements.txt
-pip install gm  # 掘金SDK
+使用Anaconda Python安装依赖：
+
+```cmd
+D:\ProgramData\anaconda3\python.exe -m pip install -r requirements.txt
+D:\ProgramData\anaconda3\python.exe -m pip install gm  # 掘金SDK
+```
+
+或使用便捷脚本：
+
+```cmd
+run_python.bat -m pip install -r requirements.txt
 ```
 
 ### 配置数据源
 
-1. 复制配置模板：
-```bash
-cp config_data_source.py.example config_data_source.py
-```
+1. 配置环境变量（推荐）：
+   编辑 `.env` 文件，填入您的掘金Token：
+   ```bash
+   DIGGOLD_TOKEN=your_token_here
+   ```
 
-2. 编辑 `config_data_source.py`，填入您的掘金Token：
-```python
-'token': 'xxxxxxxxxxxxxxxx'  # 替换为您的Token
-```
+2. 或配置文件：
+   编辑 `data/config_data_source.py`，填入您的掘金Token：
+   ```python
+   'token': 'xxxxxxxxxxxxxxxx'  # 替换为您的Token
+   ```
 
 ### 运行示例
 
 #### StockPre - 沪深300成分股筛选
 
-```bash
-python stockPre.py
+使用Anaconda Python：
+```cmd
+D:\ProgramData\anaconda3\python.exe strategies\stockPre.py
+```
+
+或使用便捷脚本：
+```cmd
+run_python.bat strategies\stockPre.py
 ```
 
 **输出示例**:
@@ -111,9 +129,16 @@ python stockPre.py
 
 #### Stock Grain Ranking - 个股多维评分分析
 
-```bash
+使用Anaconda Python：
+```cmd
 cd stock_grain_ranking
-python main.py -s 600489 601088 -b 20250207 -e 20260207
+D:\ProgramData\anaconda3\python.exe main.py -s 600489 601088 -b 20250207 -e 20260207
+```
+
+或使用便捷脚本：
+```cmd
+cd stock_grain_ranking
+..\run_python.bat main.py -s 600489 601088 -b 20250207 -e 20260207
 ```
 
 **参数说明**:

@@ -10,6 +10,8 @@
 - **STOCKPRE_BENCHMARK.md** - StockPre策略基准测试
 
 ### 📖 技术文档
+- **PYTHON_ENVIRONMENT.md** - Anaconda Python环境配置
+- **ANAONDA_SETUP_SUMMARY.md** - Anaconda配置完成摘要
 - **akshare_data_sources.md** - AkShare数据源使用文档
 - **PROJECT_SETUP.md** - 项目配置指南
 
