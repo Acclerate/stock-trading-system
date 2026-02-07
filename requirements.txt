@@ -1,4 +1,4 @@
 pandas>=2.2.0
-akshare==1.2.3
-pandas_ta==0.3.14b0
-numpy==1.23.5
+akshare>=1.18.22
+pandas-ta==0.4.71b0
+numpy>=2.2.6
