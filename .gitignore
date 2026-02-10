@@ -34,9 +34,9 @@ data/config_data_source.py
 .env.local
 
 # Documents
-下周一操作计划.md
-专业交易监控系统.md
-金风科技交易分析报告.md
+*.md
 
 # Cache
 cache/*.pkl
+Efinance_Strategy/金风科技交易复盘报告 .txt
+nul

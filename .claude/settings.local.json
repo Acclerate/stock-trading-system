@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main.py:*)",
+      "Bash(python:*)",
+      "Bash(conda env list:*)",
+      "Bash(/d/ProgramData/anaconda3/python.exe:*)"
+    ]
+  }
+}

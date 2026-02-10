@@ -7,6 +7,13 @@ import pickle
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
+import sys
+import os
+
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from data.data_resilient import DataResilient
 
 def calculate_indicators(df):
     """计算技术指标"""
@@ -70,19 +77,41 @@ def analyze_stock(df):
 def main():
     cache_dir = Path("cache/stock")
 
+    # 获取股票名称映射
+    stock_info = DataResilient.get_stock_info(use_cache=True)
+    name_map = dict(zip(stock_info['code'], stock_info['name'])) if not stock_info.empty else {}
+
     print(f"{'='*70}")
     print(f"{'每日选股分析报告':^50}")
     print(f"{'时间: ' + datetime.now().strftime('%Y-%m-%d %H:%M:%S'):^50}")
     print(f"{'='*70}\n")
 
-    results = []
+    # 先收集所有缓存文件，按股票分组
+    stock_files = {}  # {symbol: [(file, end_date), ...]}
 
     for cache_file in cache_dir.glob("*.pkl"):
         try:
-            # 从文件名提取股票代码
-            symbol = cache_file.stem.split('_')[0]
+            parts = cache_file.stem.split('_')
+            if len(parts) >= 3:
+                symbol = parts[0]
+                start_date = parts[1]
+                end_date = parts[2]
 
-            with open(cache_file, 'rb') as f:
+                if symbol not in stock_files:
+                    stock_files[symbol] = []
+                stock_files[symbol].append((cache_file, start_date, end_date))
+        except Exception:
+            continue
+
+    results = []
+
+    for symbol, files in stock_files.items():
+        # 按结束日期排序，取最新的
+        files.sort(key=lambda x: x[2], reverse=True)
+        latest_file, start_date, end_date = files[0]
+
+        try:
+            with open(latest_file, 'rb') as f:
                 df = pickle.load(f)
 
             analysis = analyze_stock(df)
@@ -90,9 +119,12 @@ def main():
             if analysis and analysis['satisfied_count'] >= 2:
                 results.append({
                     'symbol': symbol,
+                    'name': name_map.get(symbol, '未知'),
+                    'start_date': start_date,
+                    'end_date': end_date,
                     **analysis
                 })
-        except Exception as e:
+        except Exception:
             continue
 
     # 按满足条件数量排序
@@ -109,12 +141,15 @@ def main():
         return
 
     print(f"【找到 {len(results)} 只满足条件的股票】\n")
-    print(f"{'代码':<10}{'价格':<10}{'RSI':<8}{'满足条件数':<12}{'买入条件'}")
-    print("-" * 70)
+    print(f"{'代码':<8}{'名称':<10}{'日期范围':<18}{'价格':<10}{'RSI':<8}{'满足条件数':<12}{'买入条件'}")
+    print("-" * 100)
 
     for r in results:
         conditions_str = ' + '.join(r['conditions'])
-        print(f"{r['symbol']:<10}"
+        date_range = f"{r['start_date'][:4]}-{r['start_date'][4:6]}-{r['start_date'][6:]} ~ {r['end_date'][:4]}-{r['end_date'][4:6]}-{r['end_date'][6:]}"
+        print(f"{r['symbol']:<8}"
+              f"{r['name']:<10}"
+              f"{date_range:<18}"
               f"{r['price']:>8.2f}  "
               f"{r['rsi']:>6.1f}  "
               f"{r['satisfied_count']}/5      "
