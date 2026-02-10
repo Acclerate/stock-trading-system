@@ -40,3 +40,5 @@ data/config_data_source.py
 cache/*.pkl
 Efinance_Strategy/* .txt
 nul
+*.csv
+Efinance_Strategy/*.txt

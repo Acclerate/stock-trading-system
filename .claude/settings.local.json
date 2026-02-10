@@ -13,7 +13,12 @@
       "mcp__filesystem__list_directory",
       "mcp__memory__add_observations",
       "mcp__web-reader__webReader",
-      "mcp__sequential-thinking__sequentialthinking"
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(pip show:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(Select-String:*)",
+      "Bash(Select-Object -First 30:*)"
     ]
   }
 }
