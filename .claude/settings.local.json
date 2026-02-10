@@ -4,7 +4,16 @@
       "Bash(python main.py:*)",
       "Bash(python:*)",
       "Bash(conda env list:*)",
-      "Bash(/d/ProgramData/anaconda3/python.exe:*)"
+      "Bash(/d/ProgramData/anaconda3/python.exe:*)",
+      "Bash(\"D:\\\\ProgramData\\\\anaconda3\\\\python.exe\":*)",
+      "mcp__memory__create_entities",
+      "mcp__memory__create_relations",
+      "mcp__memory__delete_entities",
+      "mcp__memory__delete_relations",
+      "mcp__filesystem__list_directory",
+      "mcp__memory__add_observations",
+      "mcp__web-reader__webReader",
+      "mcp__sequential-thinking__sequentialthinking"
     ]
   }
 }

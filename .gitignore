@@ -38,5 +38,5 @@ data/config_data_source.py
 
 # Cache
 cache/*.pkl
-Efinance_Strategy/金风科技交易复盘报告 .txt
+Efinance_Strategy/* .txt
 nul

@@ -11,6 +11,7 @@ argument-hint: <股票代码> [--list]
 ## 使用方式
 
 ```
+/stock-analyzer 300476                    # 分析胜宏科技
 /stock-analyzer 002202                    # 分析金风科技
 /stock-analyzer --list                    # 分析自选股列表
 ```
@@ -22,7 +23,7 @@ argument-hint: <股票代码> [--list]
 调用 Python 脚本获取股票数据：
 
 ```bash
-!cd "D:/privategit/github/stockScience" && python analyze_jinfeng_v2.py $ARGUMENTS
+!cd "D:/privategit/github/stockScience" && python stock_analyzer.py $ARGUMENTS
 ```
 
 ### 2. 技术分析 (40% 权重，70分)

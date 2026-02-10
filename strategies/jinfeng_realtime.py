@@ -1,6 +1,11 @@
 """
 掘金SDK实时股票分析工具
 支持实时行情获取和技术分析
+
+新增功能：
+- 多股票同时监控
+- 信号提醒
+- 配置文件支持
 """
 import sys
 import os
@@ -27,6 +32,14 @@ from gm.api import (
     current,
     last_tick
 )
+
+# 导入实时监控模块
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from realtime_monitor.indicator_engine import IndicatorEngine
+from realtime_monitor.signal_alert import SignalAlert
+from realtime_monitor.monitor_config import MonitorConfig
 
 # 技术指标库
 import talib
@@ -675,6 +688,153 @@ class JinFengRealtimeAnalyzer:
             print(f"最后评分: {prev_score}" if prev_score is not None else "无数据")
             print(f"{'='*80}\n")
 
+    def continuous_monitor_multi(self, config: MonitorConfig):
+        """
+        多股票持续监控
+
+        使用线程池并发处理多只股票
+
+        参数:
+            config: MonitorConfig 配置对象
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        enabled_stocks = config.get_enabled_stocks()
+
+        if not enabled_stocks:
+            print("❌ 没有启用的股票，请检查配置文件")
+            return
+
+        print(f"\n{'='*80}")
+        print(f"🔄 开启多股票持续监控模式")
+        print(f"{'='*80}")
+        print(f"股票数量: {len(enabled_stocks)}")
+        print(f"更新间隔: {config.interval_seconds}秒")
+        print(f"并发线程: {config.max_workers}")
+        print(f"按 Ctrl+C 停止监控\n")
+
+        # 创建信号提醒器
+        signal_alert = SignalAlert()
+
+        # 记录每只股票的信号状态
+        signal_states = {}
+
+        try:
+            with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+                futures = {}
+
+                for stock in enabled_stocks:
+                    future = executor.submit(
+                        self._monitor_single_stock_once,
+                        stock,
+                        config,
+                        signal_alert,
+                        signal_states
+                    )
+                    futures[future] = stock
+
+                # 持续监控循环
+                update_count = 0
+                while True:
+                    if config.max_updates_per_stock and update_count >= config.max_updates_per_stock:
+                        print(f"\n⏹️ 达到最大更新次数 ({config.max_updates_per_stock})，停止监控")
+                        break
+
+                    update_count += 1
+                    current_time = datetime.now()
+
+                    # 判断是否在交易时间
+                    hour, minute = current_time.hour, current_time.minute
+                    is_trading_time = (
+                        (9 <= hour < 15) and
+                        not (hour == 11 and minute > 30) and
+                        not (hour == 12)
+                    )
+
+                    if not is_trading_time:
+                        print(f"⏸️ {current_time.strftime('%H:%M:%S')} - 非交易时间，休眠中...")
+                        time.sleep(config.interval_seconds)
+                        continue
+
+                    # 重新提交所有股票的监控任务
+                    new_futures = {}
+                    for stock in enabled_stocks:
+                        future = executor.submit(
+                            self._monitor_single_stock_once,
+                            stock,
+                            config,
+                            signal_alert,
+                            signal_states
+                        )
+                        new_futures[future] = stock
+
+                    # 等待所有任务完成
+                    for future in as_completed(new_futures):
+                        stock = new_futures[future]
+                        try:
+                            future.result(timeout=10)
+                        except Exception as e:
+                            print(f"⚠️ 监控 {stock['symbol']} 失败: {e}")
+
+                    print(f"\n⏳ 等待 {config.interval_seconds} 秒后下次更新...")
+                    time.sleep(config.interval_seconds)
+
+        except KeyboardInterrupt:
+            print(f"\n\n⏹️ 用户停止监控")
+            print(f"{'='*80}")
+            print(f"📊 监控统计")
+            print(f"{'='*80}")
+            print(f"总更新次数: {update_count}")
+            print(f"{'='*80}\n")
+
+    def _monitor_single_stock_once(self, stock, config: MonitorConfig,
+                                    signal_alert: SignalAlert, signal_states: dict):
+        """
+        单股票单次监控（用于多股票模式）
+
+        参数:
+            stock: StockConfig 对象
+            config: MonitorConfig 配置对象
+            signal_alert: SignalAlert 对象
+            signal_states: 信号状态字典
+        """
+        try:
+            # 获取实时数据
+            df = self.get_realtime_data(stock.symbol, frequency='60s', use_intraday=True)
+            if df is None or df.empty:
+                return
+
+            # 使用新的指标引擎计算
+            df = IndicatorEngine.calculate_all(df)
+            if df is None:
+                return
+
+            # 生成信号
+            current_signal = IndicatorEngine.generate_signal(df)
+
+            # 获取当前价格
+            latest_price = df['close'].iloc[-1]
+
+            # 获取之前的信号状态
+            prev_signal = signal_states.get(stock.symbol)
+
+            # 检查信号是否变化
+            if prev_signal is None or current_signal['signal'] != prev_signal.get('signal'):
+                # 发送提醒
+                signal_alert.send_alert(
+                    symbol=stock.symbol,
+                    name=stock.name,
+                    current_signal=current_signal,
+                    prev_signal=prev_signal,
+                    price=latest_price
+                )
+
+                # 更新信号状态
+                signal_states[stock.symbol] = current_signal
+
+        except Exception as e:
+            print(f"⚠️ 监控 {stock.symbol} 出错: {e}")
+
 
 def main():
     """主函数 - 支持命令行参数"""
@@ -697,6 +857,12 @@ def main():
                         choices=['tick', '60s', '300s', '900s', '1d'],
                         help='数据频率 (默认: 60s)')
 
+    # 新增：多股票监控模式
+    parser.add_argument('--mode', type=str, choices=['single', 'multi'], default='single',
+                        help='运行模式: single=单股票, multi=多股票 (默认: single)')
+    parser.add_argument('--config', type=str, default='strategies/watchlist.yaml',
+                        help='配置文件路径 (多股票模式)')
+
     args = parser.parse_args()
 
     print("="*80)
@@ -713,6 +879,31 @@ def main():
         print("❌ 初始化失败，请检查DIGGOLD_TOKEN配置")
         return
 
+    # ========== 多股票监控模式 ==========
+    if args.mode == 'multi':
+        print(f"📋 多股票监控模式")
+        print(f"📁 配置文件: {args.config}")
+
+        try:
+            config = MonitorConfig.from_yaml(args.config)
+            enabled_stocks = config.get_enabled_stocks()
+            print(f"✅ 加载了 {len(enabled_stocks)} 只股票")
+
+            for stock in enabled_stocks:
+                print(f"  - {stock.name} ({stock.symbol})")
+
+            print(f"\n🔄 开始多股票监控...")
+            analyzer.continuous_monitor_multi(config)
+            return
+        except FileNotFoundError:
+            print(f"❌ 配置文件不存在: {args.config}")
+            print(f"💡 提示: 运行 'python -m realtime_monitor.monitor_config' 创建默认配置")
+            return
+        except Exception as e:
+            print(f"❌ 加载配置失败: {e}")
+            return
+
+    # ========== 单股票模式 ==========
     # 持续监控模式
     if args.monitor:
         analyzer.continuous_monitor(

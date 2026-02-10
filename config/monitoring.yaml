@@ -1,0 +1,25 @@
+alerts:
+  console: true
+  log_dir: logs/signals
+  log_file: true
+  thresholds:
+    buy_score: 4
+    sell_score: 2
+monitoring:
+  event_driven:
+    bar_count: 120
+    frequency: 60s
+    subscribe_fields:
+    - symbol
+    - eob
+    - open
+    - high
+    - low
+    - close
+    - volume
+    - amount
+  polling:
+    interval_seconds: 30
+    max_workers: 8
+    retry_attempts: 3
+    retry_delay: 5

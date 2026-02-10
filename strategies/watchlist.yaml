@@ -1,0 +1,13 @@
+interval_seconds: 30
+max_updates_per_stock: null
+max_workers: 8
+stocks:
+- enabled: true
+  name: 金风科技
+  symbol: '002202'
+- enabled: true
+  name: 晶澳科技
+  symbol: 002459
+- enabled: false
+  name: 中金黄金
+  symbol: '600489'
