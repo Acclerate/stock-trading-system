@@ -48,3 +48,4 @@ outputs/*.txt
 cache/*/*.pkl
 outputs/low_volume_breakout/*.txt
 strategies/low_volume_breakout/outputs/low_volume_breakout/*.txt
+institutional_output.txt

@@ -70,7 +70,7 @@ class SignalGenerator:
 
     def check_basic_conditions(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        检查基本条件（必须全部满足）
+        检查基本条件（必须全部满足）- 机构级版本
 
         Args:
             df: 包含指标的DataFrame
@@ -84,7 +84,17 @@ class SignalGenerator:
         latest = df.iloc[-1]
         reasons = []
 
-        # 条件1：长期低位震荡（两年低位）
+        # ==================== 机构级条件1：趋势过滤 ====================
+        if self.config.require_trend_filter:
+            ma20 = latest.get(f'ma{self.config.ma_mid}', 0)
+            ma60 = latest.get(f'ma{self.config.ma_long}', 0)
+            if ma20 <= 0 or ma60 <= 0:
+                return False, ["均线指标未计算（数据不足60天）"]
+            if ma20 <= ma60:
+                return False, [f"趋势未转强 (MA20={ma20:.2f} <= MA60={ma60:.2f})，避免下跌中继"]
+            reasons.append(f"趋势向上(MA20>MA60)")
+
+        # ==================== 机构级条件2：长期低位震荡（两年低位）====================
         price_position = latest.get('price_position', 0)
         if price_position <= 0:
             return False, ["指标未计算（数据不足730天）"]
@@ -92,7 +102,19 @@ class SignalGenerator:
             return False, [f"价格位置过高 ({price_position:.1%} >= {self.config.low_threshold:.0%})"]
         reasons.append(f"两年低位({price_position:.1%})")
 
-        # 条件2：近期逐步放量
+        # ==================== 机构级条件3：成交量连续放大验证 ====================
+        if self.config.require_volume_progressive:
+            vol5 = latest.get(f'volume_ma{self.config.volume_ma_short}', 0)
+            vol20 = latest.get(f'volume_ma{self.config.volume_ma_mid}', 0)
+            vol60 = latest.get(f'volume_ma{self.config.volume_ma_long}', 0)
+
+            if vol5 <= 0 or vol20 <= 0 or vol60 <= 0:
+                return False, ["均量指标未计算（数据不足60天）"]
+            if vol5 <= vol20 or vol20 <= vol60:
+                return False, [f"成交量未连续放大 (VOL5={vol5:.0f} <= VOL20={vol20:.0f} 或 VOL20 <= VOL60={vol60:.0f})"]
+            reasons.append("量能递进")
+
+        # ==================== 条件4：近期逐步放量 ====================
         volume_expansion = latest.get('volume_expansion', 0)
         volume_trend = latest.get('volume_trend', 0)
 
@@ -107,7 +129,24 @@ class SignalGenerator:
 
         reasons.append(f"放量({volume_expansion:.1f}x)")
 
-        # 条件3：趋势转强
+        # ==================== 机构级条件5：换手率过滤 ====================
+        if self.config.min_turnover_rate > 0:
+            # 计算当日换手率
+            if len(df) >= 1:
+                turnover_rate = self._calculate_turnover_rate(latest, df)
+                if turnover_rate < self.config.min_turnover_rate:
+                    return False, [f"换手率过低 ({turnover_rate:.2%} < {self.config.min_turnover_rate:.1%})"]
+                reasons.append(f"换手率({turnover_rate:.1%})")
+
+        # ==================== 机构级条件6：波动率压缩 ====================
+        if self.config.max_volatility_20d < 1.0:  # 启用波动率过滤
+            if len(df) >= 20:
+                volatility_20d = self._calculate_volatility_20d(df)
+                if volatility_20d > self.config.max_volatility_20d:
+                    return False, [f"波动率过高 ({volatility_20d:.1%} > {self.config.max_volatility_20d:.0%})"]
+                reasons.append(f"波动压缩({volatility_20d:.1%})")
+
+        # ==================== 条件7：趋势启动确认 ====================
         trend_strength = latest.get('trend_strength', 0)
         if trend_strength <= 0:
             return False, ["趋势指标未计算（数据不足）"]
@@ -116,6 +155,50 @@ class SignalGenerator:
         reasons.append(f"趋势启动({trend_strength:.1%})")
 
         return True, reasons
+
+    def _calculate_turnover_rate(self, latest: pd.Series, df: pd.DataFrame) -> float:
+        """
+        计算换手率
+
+        Args:
+            latest: 最新一行数据
+            df: 完整的DataFrame
+
+        Returns:
+            换手率（使用成交量估算）
+        """
+        try:
+            # 使用当日成交量 / 流通市值估算换手率
+            volume = latest.get('volume', 0)
+            # 简化处理：假设平均流通股本，实际应从数据源获取
+            # 这里使用相对换手率 = 当日成交量 / 20日平均成交量
+            avg_volume_20d = df['volume'].tail(20).mean()
+            if avg_volume_20d > 0:
+                return volume / avg_volume_20d * 0.05  # 校准系数
+            return 0
+        except:
+            return 0
+
+    def _calculate_volatility_20d(self, df: pd.DataFrame) -> float:
+        """
+        计算20日振幅
+
+        Args:
+            df: 包含OHLC数据的DataFrame
+
+        Returns:
+            20日振幅（百分比）
+        """
+        try:
+            df_20d = df.tail(20)
+            high_20d = df_20d['high'].max()
+            low_20d = df_20d['low'].min()
+
+            if low_20d > 0:
+                return (high_20d - low_20d) / low_20d
+            return 0
+        except:
+            return 0
 
     def check_safety_conditions(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """

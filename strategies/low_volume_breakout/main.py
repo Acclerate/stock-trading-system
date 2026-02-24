@@ -416,24 +416,24 @@ class LowVolumeBreakoutStrategy:
 
 
 def parse_arguments():
-    """解析命令行参数"""
+    """解析命令行参数 - 机构级版本"""
     parser = argparse.ArgumentParser(
-        description='低位放量突破策略 - 寻找长期低位震荡后逐步放量的中小盘股票'
+        description='低位放量突破策略（机构级版本）- 寻找长期低位震荡后逐步放量的中小盘股票'
     )
 
     # 策略参数（默认值None时使用config.py中的默认值）
     parser.add_argument('--min-cap', type=float, default=None,
-                       help='最小市值（亿元），默认20亿')
+                       help='最小市值（亿元），机构级默认30亿')
     parser.add_argument('--max-cap', type=float, default=None,
-                       help='最大市值（亿元），默认500亿')
+                       help='最大市值（亿元），机构级默认300亿')
     parser.add_argument('--low-threshold', type=float, default=None,
-                       help='低位阈值（当前价格/250日最高价），默认0.6')
+                       help='低位阈值（当前价格/730日最高价），机构级默认0.4')
     parser.add_argument('--volume-ratio', type=float, default=None,
-                       help='放量倍数（5日均量/20日均量），默认1.5')
+                       help='放量倍数（5日均量/20日均量），机构级默认2.0')
 
     # 数据参数（默认值None时使用config.py中的默认值）
     parser.add_argument('--data-period', type=int, default=None,
-                       help='获取历史数据天数，默认300天')
+                       help='获取历史数据天数，默认1000天')
     parser.add_argument('--end-date', type=str, default=None,
                        help='结束日期（YYYY-MM-DD），默认为今天')
 
@@ -447,29 +447,61 @@ def parse_arguments():
     parser.add_argument('--output-dir', type=str, default='outputs/low_volume_breakout',
                        help='输出目录，默认outputs/low_volume_breakout')
 
+    # ==================== 机构级过滤参数 ====================
+    parser.add_argument('--no-trend-filter', action='store_true', default=False,
+                       help='禁用趋势过滤（MA20>MA60）')
+    parser.add_argument('--no-volume-progressive', action='store_true', default=False,
+                       help='禁用量能递进验证（VOL5>VOL20>VOL60）')
+    parser.add_argument('--min-turnover', type=float, default=None,
+                       help='最低换手率要求（例如0.01表示1%%）')
+    parser.add_argument('--max-volatility', type=float, default=None,
+                       help='20日最大振幅（例如0.30表示30%%）')
+
     # 过滤参数
     parser.add_argument('--skip-chinext', action='store_true', default=True,
                        help='剔除创业板股票（默认启用）')
     parser.add_argument('--include-chinext', action='store_true', default=False,
                        help='包含创业板股票（使用此参数覆盖skip-chinext）')
 
+    # ==================== 策略模式选择 ====================
+    parser.add_argument('--mode', type=str, choices=['retail', 'institutional'], default='institutional',
+                       help='策略模式：retail（散户版）或institutional（机构级，默认）')
+
     return parser.parse_args()
 
 
 def main():
-    """主程序入口"""
+    """主程序入口 - 支持机构级和散户版本"""
     # 解析命令行参数
     args = parse_arguments()
+
+    # 根据模式选择配置
+    if args.mode == 'retail':
+        # 散户版配置（更宽松的参数）
+        config_kwargs = {
+            'min_market_cap': 20.0,
+            'max_market_cap': 500.0,
+            'low_threshold': 0.6,
+            'volume_ratio': 1.5,
+            'require_trend_filter': False,
+            'min_turnover_rate': 0.0,
+            'max_volatility_20d': 1.0,
+            'require_volume_progressive': False,
+        }
+        print("使用散户版策略配置（参数较宽松）")
+    else:
+        # 机构级配置（默认）
+        config_kwargs = {}
+        print("使用机构级策略配置（参数严格，符合机构标准）")
 
     # 处理创业板过滤参数
     skip_chinext = args.skip_chinext and not args.include_chinext
 
-    # 构建配置参数字典（只包含非None的值）
-    config_kwargs = {}
+    # 覆盖命令行参数
     if args.min_cap is not None:
-        config_kwargs['min_cap'] = args.min_cap
+        config_kwargs['min_market_cap'] = args.min_cap
     if args.max_cap is not None:
-        config_kwargs['max_cap'] = args.max_cap
+        config_kwargs['max_market_cap'] = args.max_cap
     if args.low_threshold is not None:
         config_kwargs['low_threshold'] = args.low_threshold
     if args.volume_ratio is not None:
@@ -481,10 +513,18 @@ def main():
     if args.top_n is not None:
         config_kwargs['top_n'] = args.top_n
 
-    # 创建配置（使用config.py中的默认值）
-    config = StrategyConfig.from_args(**config_kwargs)
+    # 机构级参数覆盖
+    if args.no_trend_filter:
+        config_kwargs['require_trend_filter'] = False
+    if args.no_volume_progressive:
+        config_kwargs['require_volume_progressive'] = False
+    if args.min_turnover is not None:
+        config_kwargs['min_turnover_rate'] = args.min_turnover
+    if args.max_volatility is not None:
+        config_kwargs['max_volatility_20d'] = args.max_volatility
 
-    # 设置输出目录和创业板过滤
+    # 创建配置
+    config = StrategyConfig(**config_kwargs)
     config.output_dir = args.output_dir
     config.skip_chinext = skip_chinext
 

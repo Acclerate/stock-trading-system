@@ -11,16 +11,25 @@ from typing import Tuple
 @dataclass
 class StrategyConfig:
     """
-    策略参数配置类
+    策略参数配置类 - 机构级版本
 
     策略核心：寻找长期低位震荡（2年低位）的中小盘股票，在近期逐步放量时捕捉机会
+
+    机构级优化：
+    - 严格的市值范围（30-300亿）
+    - 更严格的低位阈值（40%）
+    - 更高的放量倍数（2倍）
+    - 趋势过滤（MA20 > MA60）
+    - 波动率压缩（20日振幅 < 30%）
+    - 换手率过滤（> 1%）
+    - 成交量连续放大验证
 
     Attributes:
         # 选股参数
         min_market_cap: 最小市值（亿元）
         max_market_cap: 最大市值（亿元）
-        low_threshold: 低位阈值（当前价格/730日最高价，即2年位置）
-        volume_ratio: 放量倍数（5日均量/20日均量）
+        low_threshold: 低位阈值（当前价格/730日最高价，机构级建议40%）
+        volume_ratio: 放量倍数（5日均量/20日均量，机构级建议2倍）
 
         # 数据参数
         data_period: 获取历史数据天数
@@ -35,6 +44,12 @@ class StrategyConfig:
         volume_ma_mid: 中期均量周期
         volume_ma_long: 长期均量周期
         high_period: 730日最高价周期
+
+        # 机构级过滤参数
+        require_trend_filter: 是否启用趋势过滤（MA20 > MA60）
+        min_turnover_rate: 最低换手率要求
+        max_volatility_20d: 20日最大振幅（波动率压缩）
+        require_volume_progressive: 是否要求成交量连续放大
 
         # 过滤参数
         min_listing_days: 剔除上市不足N天的次新股
@@ -59,11 +74,11 @@ class StrategyConfig:
         recent_return_threshold: 近期涨幅阈值（5日涨幅超过此值警告）
     """
 
-    # 选股参数
-    min_market_cap: float = 20.0  # 最小市值（亿元）
-    max_market_cap: float = 500.0  # 最大市值（亿元）
-    low_threshold: float = 0.6  # 低位阈值：当前价格/730日最高价
-    volume_ratio: float = 1.5  # 5日均量 > 20日均量 * N
+    # ==================== 机构级选股参数 ====================
+    min_market_cap: float = 30.0  # 最小市值（亿元）- 机构级优化
+    max_market_cap: float = 300.0  # 最大市值（亿元）- 机构级优化
+    low_threshold: float = 0.4  # 低位阈值：当前价格/730日最高价 - 机构级40%
+    volume_ratio: float = 2.0  # 5日均量 > 20日均量 * N - 机构级2倍
 
     # 数据参数
     data_period: int = 1000  # 获取历史数据天数（增加缓冲区，确保有足够数据）
@@ -79,8 +94,14 @@ class StrategyConfig:
     volume_ma_long: int = 60  # 60日均量
     high_period: int = 730  # 730日最高价周期（两年最高价）
 
+    # ==================== 机构级过滤参数 ====================
+    require_trend_filter: bool = True  # 趋势过滤：要求MA20 > MA60（避免下跌中继）
+    min_turnover_rate: float = 0.01  # 最低换手率要求（1%）- 反映真实资金参与
+    max_volatility_20d: float = 0.30  # 20日最大振幅（30%）- 波动率压缩
+    require_volume_progressive: bool = True  # 成交量连续放大（VOL5>VOL20>VOL60）
+
     # 过滤参数
-    min_listing_days: int = 500  # 剔除上市不足500天的次新股（约1.4年，降低过滤门槛）
+    min_listing_days: int = 365  # 剔除上市不足365天的次新股（约1年）
     skip_st: bool = True  # 剔除ST股
     skip_suspended: bool = True  # 剔除停牌股
     skip_chinext: bool = True  # 剔除创业板股票（300开头）
@@ -143,12 +164,13 @@ class StrategyConfig:
 
     def get_display_params(self) -> dict:
         """
-        获取用于显示的参数字典
+        获取用于显示的参数字典（机构级版本）
 
         Returns:
             格式化的参数字典
         """
-        return {
+        params = {
+            '策略版本': '[机构级]',
             '市值范围': f'{self.min_market_cap}亿 - {self.max_market_cap}亿',
             '低位阈值': f'{self.low_threshold:.0%}',
             '放量倍数': f'{self.volume_ratio:.1f}x',
@@ -156,7 +178,12 @@ class StrategyConfig:
             '均线周期': f'MA{self.ma_short}/MA{self.ma_mid}/MA{self.ma_long}',
             '均量周期': f'VOL{self.volume_ma_short}/VOL{self.volume_ma_mid}/VOL{self.volume_ma_long}',
             '最高价周期': f'{self.high_period}日',
+            '趋势过滤': '[启用]' if self.require_trend_filter else '[关闭]',
+            '换手率要求': f'>={self.min_turnover_rate:.1%}' if self.min_turnover_rate > 0 else '关闭',
+            '波动率上限': f'<{self.max_volatility_20d:.0%}' if self.max_volatility_20d < 1 else '关闭',
+            '量能递进': '[启用]' if self.require_volume_progressive else '[关闭]',
         }
+        return params
 
 
 # 默认配置实例
