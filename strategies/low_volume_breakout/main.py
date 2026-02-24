@@ -54,6 +54,7 @@ class LowVolumeBreakoutStrategy:
         self.stock_pool_manager = StockPoolManager(self.config)
         self.signal_generator = SignalGenerator(self.config)
         self.results: List[SignalResult] = []
+        self._stock_names = {}  # 股票名称缓存
 
     def fetch_stock_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """
@@ -104,6 +105,10 @@ class LowVolumeBreakoutStrategy:
 
                 # 确保数据长度足够
                 if len(df) < self.config.min_data_points:
+                    # 只在第一次打印调试信息
+                    if not hasattr(self, '_debug_printed'):
+                        print(f"警告: 掘金SDK只返回 {len(df)} 天数据，需要 {self.config.min_data_points} 天")
+                        self._debug_printed = True
                     return None
 
                 return df
@@ -323,12 +328,7 @@ class LowVolumeBreakoutStrategy:
         Returns:
             股票名称
         """
-        try:
-            # 简单的代码到名称映射（可根据需要扩展）
-            # 这里可以使用掘金SDK的get_symbol_infos获取
-            return ""
-        except:
-            return ""
+        return self.stock_pool_manager.get_stock_name(symbol)
 
     def save_results(self, output: str, filename: Optional[str] = None) -> str:
         """

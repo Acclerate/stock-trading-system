@@ -85,7 +85,9 @@ class SignalGenerator:
         reasons = []
 
         # 条件1：长期低位震荡
-        price_position = latest.get('price_position', 1.0)
+        price_position = latest.get('price_position', 0)
+        if price_position <= 0:
+            return False, ["指标未计算（数据不足250天）"]
         if price_position >= self.config.low_threshold:
             return False, [f"价格位置过高 ({price_position:.1%} >= {self.config.low_threshold:.0%})"]
         reasons.append(f"低位({price_position:.1%})")
@@ -93,6 +95,9 @@ class SignalGenerator:
         # 条件2：近期逐步放量
         volume_expansion = latest.get('volume_expansion', 0)
         volume_trend = latest.get('volume_trend', 0)
+
+        if volume_expansion <= 0 or volume_trend <= 0:
+            return False, ["放量指标未计算（数据不足60天）"]
 
         if volume_expansion < self.config.volume_ratio:
             return False, [f"放量不足 ({volume_expansion:.2f}x < {self.config.volume_ratio:.1f}x)"]
@@ -104,6 +109,8 @@ class SignalGenerator:
 
         # 条件3：趋势转强
         trend_strength = latest.get('trend_strength', 0)
+        if trend_strength <= 0:
+            return False, ["趋势指标未计算（数据不足）"]
         if trend_strength <= 1.0:
             return False, [f"趋势未转强 (收盘价 < MA{self.config.ma_long})"]
         reasons.append(f"趋势启动({trend_strength:.1%})")

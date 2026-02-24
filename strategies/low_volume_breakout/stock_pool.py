@@ -42,6 +42,7 @@ class StockPoolManager:
         self.config = config or StrategyConfig()
         self._stock_pool = []
         self._market_cap_data = {}
+        self._stock_names = {}  # 股票名称映射
 
     def get_all_a_stocks(self, trade_date: Optional[str] = None) -> List[str]:
         """
@@ -103,6 +104,12 @@ class StockPoolManager:
                 chinext_filtered = before_chinext_count - len(valid_stocks)
 
             all_stocks = list(valid_stocks['symbol'])
+
+            # 保存股票名称映射
+            if 'sec_name' in valid_stocks.columns:
+                self._stock_names = dict(zip(valid_stocks['symbol'], valid_stocks['sec_name']))
+            else:
+                self._stock_names = {}
 
             filter_desc = f"(剔除次新股<{self.config.min_listing_days}天, 停牌={self.config.skip_suspended}, ST={self.config.skip_st}"
             if self.config.skip_chinext:
@@ -247,6 +254,18 @@ class StockPoolManager:
             市值（亿元），如果不存在返回None
         """
         return self._market_cap_data.get(symbol)
+
+    def get_stock_name(self, symbol: str) -> str:
+        """
+        获取股票名称
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            股票名称，如果不存在返回空字符串
+        """
+        return self._stock_names.get(symbol, "")
 
     def get_stock_info_batch(self, symbols: List[str]) -> pd.DataFrame:
         """
