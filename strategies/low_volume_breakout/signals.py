@@ -84,13 +84,13 @@ class SignalGenerator:
         latest = df.iloc[-1]
         reasons = []
 
-        # 条件1：长期低位震荡
+        # 条件1：长期低位震荡（两年低位）
         price_position = latest.get('price_position', 0)
         if price_position <= 0:
-            return False, ["指标未计算（数据不足250天）"]
+            return False, ["指标未计算（数据不足730天）"]
         if price_position >= self.config.low_threshold:
             return False, [f"价格位置过高 ({price_position:.1%} >= {self.config.low_threshold:.0%})"]
-        reasons.append(f"低位({price_position:.1%})")
+        reasons.append(f"两年低位({price_position:.1%})")
 
         # 条件2：近期逐步放量
         volume_expansion = latest.get('volume_expansion', 0)
@@ -148,7 +148,7 @@ class SignalGenerator:
         # 检查近期涨幅是否过大
         if len(df) >= 5:
             recent_return = (latest['close'] - df.iloc[-5]['close']) / df.iloc[-5]['close']
-            if recent_return > 0.2:  # 5日涨幅超过20%
+            if recent_return > self.config.recent_return_threshold:
                 warnings.append(f"近期涨幅过大({recent_return:.1%})")
 
         is_safe = len(warnings) == 0
@@ -246,7 +246,7 @@ class SignalGenerator:
         score = self.calculate_score(df, market_cap)
 
         # 生成信号
-        signal_type = SignalType.BUY if score > 50 else SignalType.WAIT
+        signal_type = SignalType.BUY if score > self.config.buy_threshold else SignalType.WAIT
 
         return SignalResult(
             symbol=symbol,

@@ -81,8 +81,11 @@ class IndicatorCalculator:
         Returns:
             添加了最高价和最低价列的DataFrame
         """
-        # 250日最高价
+        # 730日最高价（两年最高）
         df[f'high_{self.config.high_period}'] = df['high'].rolling(window=self.config.high_period).max()
+
+        # 730日最低价（两年最低）
+        df[f'low_{self.config.high_period}'] = df['low'].rolling(window=self.config.high_period).min()
 
         # 120日最高价和最低价（用于计算振幅）
         df['high_120'] = df['high'].rolling(window=120).max()
@@ -162,11 +165,12 @@ class IndicatorCalculator:
             添加了策略指标的DataFrame
 
         策略指标包括：
-        - 价格位置因子：当前价格 / 250日最高价
+        - 价格位置因子：当前价格 / 730日最高价
         - 放量因子：5日均量 / 20日均量
         - 均量趋势因子：20日均量 / 60日均量
         - 趋势因子：收盘价 / MA60
         - 120日振幅：(120日最高 - 120日最低) / 120日最低
+        - 730日振幅：(730日最高 - 730日最低) / 730日最低
         """
         if df.empty or len(df) < self.config.high_period:
             return df
@@ -176,7 +180,7 @@ class IndicatorCalculator:
         df = self.calculate_volume_ma(df)
         df = self.calculate_high_low(df)
 
-        # 价格位置因子：当前价格 / 250日最高价
+        # 价格位置因子：当前价格 / 730日最高价（两年位置）
         df['price_position'] = df['close'] / df[f'high_{self.config.high_period}']
 
         # 放量因子：5日均量 / 20日均量
@@ -190,6 +194,9 @@ class IndicatorCalculator:
 
         # 120日振幅
         df['amplitude_120'] = (df['high_120'] - df['low_120']) / df['low_120']
+
+        # 730日振幅（两年振幅）
+        df['amplitude_730'] = (df[f'high_{self.config.high_period}'] - df[f'low_{self.config.high_period}']) / df[f'low_{self.config.high_period}']
 
         # 综合放量指标（满足放量条件时为True）
         df['is_volume_expanding'] = (
@@ -252,13 +259,33 @@ class IndicatorCalculator:
             'amplitude_120': latest.get('amplitude_120', 0),
             'rsi': latest.get('rsi', 50),
             'boll_width': latest.get('boll_width', 0),
-            'boll_position': (latest['close'] - latest.get('boll_lower', latest['close'])) /
-                             (latest.get('boll_upper', latest['close']) - latest.get('boll_lower', latest['close']))
-                             if latest.get('boll_upper', latest['close']) != latest.get('boll_lower', latest['close']) else 0.5,
+            'boll_position': self._calculate_boll_position(latest),
             'macd_hist': latest.get('macd_hist', 0),
         }
 
         return signals
+
+    def _calculate_boll_position(self, latest: pd.Series) -> float:
+        """
+        计算布林带位置（价格在上轨和下轨之间的相对位置）
+
+        Args:
+            latest: 最新一行数据
+
+        Returns:
+            布林带位置 (0-1之间，0.5表示在中轨)
+        """
+        close = latest['close']
+        boll_upper = latest.get('boll_upper', close)
+        boll_lower = latest.get('boll_lower', close)
+
+        # 如果上轨和下轨相等，返回中值0.5
+        if boll_upper == boll_lower:
+            return 0.5
+
+        # 计算价格在布林带中的相对位置
+        boll_position = (close - boll_lower) / (boll_upper - boll_lower)
+        return boll_position
 
 
 # 便捷函数

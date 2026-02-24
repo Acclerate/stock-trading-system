@@ -105,8 +105,10 @@ class StockPoolManager:
 
             all_stocks = list(valid_stocks['symbol'])
 
-            # 保存股票名称映射
+            # 保存股票名称映射（使用symbol作为key，确保唯一性）
             if 'sec_name' in valid_stocks.columns:
+                # 确保symbol列没有重复，避免映射错误
+                valid_stocks = valid_stocks.drop_duplicates(subset=['symbol'], keep='first')
                 self._stock_names = dict(zip(valid_stocks['symbol'], valid_stocks['sec_name']))
             else:
                 self._stock_names = {}
@@ -265,7 +267,28 @@ class StockPoolManager:
         Returns:
             股票名称，如果不存在返回空字符串
         """
-        return self._stock_names.get(symbol, "")
+        # 先从缓存中查找
+        name = self._stock_names.get(symbol, "")
+
+        # 如果缓存中没有，尝试从掘金SDK实时获取
+        if not name and DIGGOLD_AVAILABLE:
+            try:
+                info = get_symbols(
+                    sec_type1=1010,
+                    sec_type2=101001,
+                    df=True
+                )
+                if not info.empty:
+                    # 查找匹配的股票
+                    stock_info = info[info['symbol'] == symbol]
+                    if not stock_info.empty:
+                        name = stock_info.iloc[0]['sec_name']
+                        # 更新缓存
+                        self._stock_names[symbol] = name
+            except Exception as e:
+                pass  # 静默失败，返回空字符串
+
+        return name
 
     def get_stock_info_batch(self, symbols: List[str]) -> pd.DataFrame:
         """
