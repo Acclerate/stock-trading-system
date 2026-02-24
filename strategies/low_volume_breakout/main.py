@@ -421,31 +421,37 @@ def parse_arguments():
         description='低位放量突破策略 - 寻找长期低位震荡后逐步放量的中小盘股票'
     )
 
-    # 策略参数
-    parser.add_argument('--min-cap', type=float, default=20.0,
+    # 策略参数（默认值None时使用config.py中的默认值）
+    parser.add_argument('--min-cap', type=float, default=None,
                        help='最小市值（亿元），默认20亿')
-    parser.add_argument('--max-cap', type=float, default=200.0,
-                       help='最大市值（亿元），默认200亿')
-    parser.add_argument('--low-threshold', type=float, default=0.6,
+    parser.add_argument('--max-cap', type=float, default=None,
+                       help='最大市值（亿元），默认500亿')
+    parser.add_argument('--low-threshold', type=float, default=None,
                        help='低位阈值（当前价格/250日最高价），默认0.6')
-    parser.add_argument('--volume-ratio', type=float, default=1.5,
+    parser.add_argument('--volume-ratio', type=float, default=None,
                        help='放量倍数（5日均量/20日均量），默认1.5')
 
-    # 数据参数
-    parser.add_argument('--data-period', type=int, default=300,
+    # 数据参数（默认值None时使用config.py中的默认值）
+    parser.add_argument('--data-period', type=int, default=None,
                        help='获取历史数据天数，默认300天')
     parser.add_argument('--end-date', type=str, default=None,
                        help='结束日期（YYYY-MM-DD），默认为今天')
 
-    # 并发参数
-    parser.add_argument('--max-workers', type=int, default=8,
+    # 并发参数（默认值None时使用config.py中的默认值）
+    parser.add_argument('--max-workers', type=int, default=None,
                        help='并发处理线程数，默认8')
 
-    # 输出参数
-    parser.add_argument('--top-n', type=int, default=50,
+    # 输出参数（默认值None时使用config.py中的默认值）
+    parser.add_argument('--top-n', type=int, default=None,
                        help='输出Top N股票，默认50')
     parser.add_argument('--output-dir', type=str, default='outputs/low_volume_breakout',
                        help='输出目录，默认outputs/low_volume_breakout')
+
+    # 过滤参数
+    parser.add_argument('--skip-chinext', action='store_true', default=True,
+                       help='剔除创业板股票（默认启用）')
+    parser.add_argument('--include-chinext', action='store_true', default=False,
+                       help='包含创业板股票（使用此参数覆盖skip-chinext）')
 
     return parser.parse_args()
 
@@ -455,19 +461,32 @@ def main():
     # 解析命令行参数
     args = parse_arguments()
 
-    # 创建配置
-    config = StrategyConfig.from_args(
-        min_cap=args.min_cap,
-        max_cap=args.max_cap,
-        low_threshold=args.low_threshold,
-        volume_ratio=args.volume_ratio,
-        data_period=args.data_period,
-        max_workers=args.max_workers,
-        top_n=args.top_n,
-    )
+    # 处理创业板过滤参数
+    skip_chinext = args.skip_chinext and not args.include_chinext
 
-    # 设置输出目录
+    # 构建配置参数字典（只包含非None的值）
+    config_kwargs = {}
+    if args.min_cap is not None:
+        config_kwargs['min_cap'] = args.min_cap
+    if args.max_cap is not None:
+        config_kwargs['max_cap'] = args.max_cap
+    if args.low_threshold is not None:
+        config_kwargs['low_threshold'] = args.low_threshold
+    if args.volume_ratio is not None:
+        config_kwargs['volume_ratio'] = args.volume_ratio
+    if args.data_period is not None:
+        config_kwargs['data_period'] = args.data_period
+    if args.max_workers is not None:
+        config_kwargs['max_workers'] = args.max_workers
+    if args.top_n is not None:
+        config_kwargs['top_n'] = args.top_n
+
+    # 创建配置（使用config.py中的默认值）
+    config = StrategyConfig.from_args(**config_kwargs)
+
+    # 设置输出目录和创业板过滤
     config.output_dir = args.output_dir
+    config.skip_chinext = skip_chinext
 
     # 运行策略
     strategy = LowVolumeBreakoutStrategy(config)

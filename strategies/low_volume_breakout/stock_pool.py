@@ -95,11 +95,21 @@ class StockPoolManager:
                 (stocks_info['delisted_date'] > trade_date_ts)
             ]
 
+            # 剔除创业板股票（代码以300开头，如SZSE.300xxx）
+            chinext_filtered = 0
+            if self.config.skip_chinext:
+                before_chinext_count = len(valid_stocks)
+                valid_stocks = valid_stocks[~valid_stocks['symbol'].str.contains(r'SZSE\.30\d{3}')]
+                chinext_filtered = before_chinext_count - len(valid_stocks)
+
             all_stocks = list(valid_stocks['symbol'])
 
-            print(f"可选股票池数量: {len(all_stocks)} "
-                  f"(剔除次新股<{self.config.min_listing_days}天, "
-                  f"停牌={self.config.skip_suspended}, ST={self.config.skip_st})")
+            filter_desc = f"(剔除次新股<{self.config.min_listing_days}天, 停牌={self.config.skip_suspended}, ST={self.config.skip_st}"
+            if self.config.skip_chinext:
+                filter_desc += f", 创业板={chinext_filtered}"
+            filter_desc += ")"
+
+            print(f"可选股票池数量: {len(all_stocks)} {filter_desc}")
 
             self._stock_pool = all_stocks
             return all_stocks

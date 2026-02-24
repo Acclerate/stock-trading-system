@@ -49,7 +49,7 @@ class StrategyConfig:
 
     # 选股参数
     min_market_cap: float = 20.0  # 最小市值（亿元）
-    max_market_cap: float = 200.0  # 最大市值（亿元）
+    max_market_cap: float = 500.0  # 最大市值（亿元）
     low_threshold: float = 0.6  # 低位阈值：当前价格/250日最高价
     volume_ratio: float = 1.5  # 5日均量 > 20日均量 * N
 
@@ -71,6 +71,7 @@ class StrategyConfig:
     min_listing_days: int = 180  # 剔除上市不足N天的次新股
     skip_st: bool = True  # 剔除ST股
     skip_suspended: bool = True  # 剔除停牌股
+    skip_chinext: bool = True  # 剔除创业板股票（300开头）
 
     # 并发参数
     max_workers: int = 8  # 并发处理线程数
