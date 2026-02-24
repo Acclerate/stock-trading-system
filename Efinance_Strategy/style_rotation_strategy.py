@@ -1,10 +1,42 @@
-﻿# coding=utf-8
+﻿# -*- coding: utf-8 -*-
 from __future__ import print_function, absolute_import, unicode_literals
 from gm.api import *
 
+import os
+import sys
 import datetime
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
+
+# 加载.env文件
+load_dotenv()
+
+# 读取token
+token = os.getenv('DIGGOLD_TOKEN')
+
+# 日志文件配置
+LOG_FILE = os.path.join(os.path.dirname(__file__), 'backtest_log_style_rotation.txt')
+
+# 重定向print到日志文件
+class Logger:
+    def __init__(self, filename):
+        self.filename = filename
+        self.terminal = sys.stdout
+        # 清空旧日志
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write('')
+
+    def write(self, message):
+        self.terminal.write(message)
+        with open(self.filename, 'a', encoding='utf-8') as f:
+            f.write(message)
+
+    def flush(self):
+        self.terminal.flush()
+
+# 启用日志记录
+sys.stdout = Logger(LOG_FILE)
 
 '''
 示例策略仅供参考，不建议直接实盘使用。
@@ -22,6 +54,8 @@ def init(context):
     context.days = 20
     # 持股数量
     context.holding_num = 10
+    # 回测结束时间(用于获取历史数据)
+    context.backtest_end_time = context.backtest_end_time
     # 每日定时任务
     schedule(schedule_func=algo, date_rule='1d', time_rule='09:30:00')
 
@@ -60,44 +94,29 @@ def algo(context):
         # 获取当前所有仓位
         positions = get_position()
 
-        # 平不在标的池的股票（注：本策略交易以开盘价为交易价格，当调整定时任务时间时，需调整对应价格）
+        # 平不在标的池的股票（使用普通下单，回测模式不支持算法交易）
         for position in positions:
             symbol = position['symbol']
             if symbol not in to_buy:
-                # 当前价（tick数据，免费版本有时间权限限制；实时模式，返回当前最新 tick 数据，回测模式，返回回测当前时间点的最近一分钟的收盘价）
-                new_price = current(symbols=symbol)[0]['price']
-                # # 普通下单
-                # order_target_percent(symbol=symbol, percent=0, order_type=OrderType_Limit,position_side=PositionSide_Long,price=new_price)
+                # 获取开盘价进行交易
+                new_price = history_n(symbol=symbol, frequency='1d', count=1,
+                                    end_time=now_str, fields='open', adjust=ADJUST_PREV,
+                                    adjust_end_time=context.backtest_end_time, df=False)[0]['open']
+                # 普通下单
+                order_target_percent(symbol=symbol, percent=0, order_type=OrderType_Limit,
+                                   position_side=PositionSide_Long, price=new_price)
+                print('{}:{}卖出委托，委托价格：{}'.format(now_str, symbol, new_price))
 
-                # 交易算法下单
-                trade_volume = position['available_now']                                            # 获取股票的可用数量
-                # 下单
-                if trade_volume>0:
-                    algo_param = {'start_time': '09:00:00', 'end_time_referred':'14:55:00', 'end_time': '14:55:00', 'end_time_valid': 1, 'stop_sell_when_dl': 1,'cancel_when_pl': 0, 'min_trade_amount': 100000}
-                    algo_order(symbol=symbol, volume=trade_volume, side=OrderSide_Sell, order_type=OrderType_Limit, position_effect=PositionEffect_Close, price=new_price, algo_name='ATS-SMART', algo_param=algo_param)
-                    print('{}:{}卖出委托，委托价格：{}，委托市值：{:.0f}'.format(now_str,symbol,new_price,trade_volume*new_price)) 
-                else:
-                    print('{}:{}可用数量不足，未成功下单！'.format(now_str,symbol))
-
-        # 买入标的池中的股票（注：本策略交易以开盘价为交易价格，当调整定时任务时间时，需调整对应价格）
+        # 买入标的池中的股票（使用普通下单，回测模式不支持算法交易）
         for symbol in to_buy:
-            # 当前价（tick数据，免费版本有时间权限限制；实时模式，返回当前最新 tick 数据，回测模式，返回回测当前时间点的最近一分钟的收盘价）
-            new_price = current(symbols=symbol)[0]['price']
+            # 获取开盘价进行交易
+            new_price = history_n(symbol=symbol, frequency='1d', count=1,
+                                end_time=now_str, fields='open', adjust=ADJUST_PREV,
+                                adjust_end_time=context.backtest_end_time, df=False)[0]['open']
             # 普通下单
-            # order_target_percent(symbol=symbol, percent=percent, order_type=OrderType_Limit,position_side=PositionSide_Long,price=new_price)
-            
-            # 交易算法下单
-            Account_cash = get_cash()                                                                # 获取账户资金信息
-            available_amount = min(Account_cash['nav']*percent,Account_cash['available'])            # 计算委托金额 
-            trade_volume = int(np.floor(available_amount/new_price/100)*100)                         # 计算下单数量
-            if symbol[:7]=='SHSE.68' and trade_volume<200:trade_volume = 0                           # 调整下单数量：科创板最小买入单位是200股
-            # 下单
-            if trade_volume>0:
-                algo_param = {'start_time': '09:00:00', 'end_time_referred':'14:55:00', 'end_time': '14:55:00', 'end_time_valid': 1, 'stop_sell_when_dl': 1,'cancel_when_pl': 0, 'min_trade_amount': 100000}
-                algo_order(symbol=symbol, volume=trade_volume, side=OrderSide_Buy, order_type=OrderType_Limit, position_effect=PositionEffect_Open, price=new_price, algo_name='ATS-SMART', algo_param=algo_param)
-                print('{}:{}买入委托，委托价格：{}，委托市值：{:.0f}'.format(now_str,symbol,new_price,trade_volume*new_price)) 
-            else:
-                print('{}:{}可用资金不足，未成功下单！'.format(now_str,symbol))
+            order_target_percent(symbol=symbol, percent=percent, order_type=OrderType_Limit,
+                               position_side=PositionSide_Long, price=new_price)
+            print('{}:{}买入委托，委托价格：{}'.format(now_str, symbol, new_price))
 
 
 def on_order_status(context, order):
@@ -129,12 +148,26 @@ def on_order_status(context, order):
             else:
                 side_effect = '平多仓'
         order_type_word = '限价' if order_type==1 else '市价'
-        print('{}:标的：{}，操作：以{}{}，委托价格：{}，委托数量：{}'.format(context.now,symbol,order_type_word,side_effect,price,volume))
+        # 输出目标仓位百分比，供backtest_analyzer.py解析
+        print('{}:标的：{}，操作：以{}{}，委托价格：{}，目标仓位：{:.2%}'.format(
+            context.now, symbol, order_type_word, side_effect, price, target_percent/100 if target_percent else 0))
        
        
 def on_backtest_finished(context, indicator):
     print('*'*50)
-    print('回测已完成，请通过右上角“回测历史”功能查询详情。')
+    print('回测已完成！')
+    print('='*50)
+    print('【回测结果摘要】')
+
+    # 使用get方法安全地访问指标，打印所有可用的指标
+    for key, value in indicator.items():
+        print('{}: {}'.format(key, value))
+
+    print('='*50)
+    print('详细日志已保存到: {}'.format(LOG_FILE))
+    print('可使用以下命令分析日志:')
+    print('  python backtest_analyzer.py {}'.format(LOG_FILE))
+    print('='*50)
 
 
 if __name__ == '__main__':
@@ -152,11 +185,11 @@ if __name__ == '__main__':
     backtest_match_mode市价撮合模式，以下一tick/bar开盘价撮合:0，以当前tick/bar收盘价撮合：1
     '''
     run(strategy_id='strategy_id',
-        filename='main.py',
+        filename='style_rotation_strategy',
         mode=MODE_BACKTEST,
-        token='{{token}}',
-        backtest_start_time='2019-01-01 08:00:00',
-        backtest_end_time='2020-12-31 16:00:00',
+        token=token,
+        backtest_start_time='2024-01-01 08:00:00',
+        backtest_end_time='2026-01-31 16:00:00',
         backtest_adjust=ADJUST_PREV,
         backtest_initial_cash=10000000,
         backtest_commission_ratio=0.0001,

@@ -42,3 +42,7 @@ Efinance_Strategy/* .txt
 nul
 *.csv
 Efinance_Strategy/*.txt
+Efinance_Strategy/cache/stock/*.pkl
+Efinance_Strategy/cache/macro/*.pkl
+outputs/*.txt
+cache/*/*.pkl

@@ -108,16 +108,74 @@ def get_hs300_symbols():
         return []
 
 
-def save_results_to_csv(results, filename='stock_pre_results.csv'):
-    """保存结果到CSV文件"""
+def save_results_to_txt(results, total_symbols, success_count, failed_count,
+                        failed_symbols, total_time, start_date, end_date):
+    """保存结果到txt文件"""
     if not results:
         print("没有结果需要保存")
-        return
-    
-    df = pd.DataFrame(results)
-    df = df.sort_values('return', ascending=False)
-    df.to_csv(filename, index=False, encoding='utf-8-sig')
-    print(f"结果已保存到 {filename}")
+        return None
+
+    sorted_results = sorted(results, key=lambda x: x['return'], reverse=True)
+
+    # 创建输出目录
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 生成按日期命名的txt文件（保留程序名称）
+    txt_filename = os.path.join(output_dir, f"stockPre_lite_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+
+    success_rate = (success_count / total_symbols * 100) if total_symbols > 0 else 0
+
+    # 准备输出内容
+    output_lines = []
+    output_lines.append("=" * 80)
+    output_lines.append(f"沪深300成分股筛选结果 (StockPre Lite版)")
+    output_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    output_lines.append(f"回测区间: {start_date.strftime('%Y%m%d')} ~ {end_date.strftime('%Y%m%d')}")
+    output_lines.append(f"筛选条件: 至少满足2个买入条件")
+    output_lines.append(f"符合数量: {len(sorted_results)} 只")
+    output_lines.append("")
+    output_lines.append("=== 统计报告 ===")
+    output_lines.append(f"总股票数: {total_symbols}")
+    output_lines.append(f"成功获取: {success_count} ({success_rate:.1f}%)")
+    output_lines.append(f"失败获取: {failed_count}")
+    output_lines.append(f"总用时: {total_time:.1f}秒")
+    output_lines.append(f"平均速度: {total_symbols/total_time:.2f} 只/秒")
+    output_lines.append("=" * 80)
+    output_lines.append("")
+
+    output_lines.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
+    output_lines.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
+    output_lines.append("-" * 100)
+
+    for item in sorted_results:
+        line = f"{item['name'][:18]:<20}{item['symbol']:<15}{item['date']:<12}" \
+               f"{item['latest_price']:>6.2f}{item['return']:>8.2%}  {item['criteria']}"
+        output_lines.append(line)
+
+    output_lines.append("")
+    output_lines.append("=" * 80)
+    output_lines.append("买入条件说明:")
+    output_lines.append("  1. 均线金叉   - MA5 > MA20")
+    output_lines.append("  2. MACD金叉  - MACD > Signal")
+    output_lines.append("  3. RSI超卖   - RSI < 30")
+    output_lines.append("  4. BOLL下轨  - 收盘价 < BOLL下轨")
+    output_lines.append("  5. 放量20%   - 成交量较3日均量放大20%")
+    output_lines.append("=" * 80)
+
+    if failed_symbols:
+        output_lines.append("")
+        output_lines.append(f"失败股票列表（共{len(failed_symbols)}只）:")
+        for symbol in failed_symbols[:20]:
+            output_lines.append(f"  - {symbol}")
+        if len(failed_symbols) > 20:
+            output_lines.append(f"  ... 还有 {len(failed_symbols) - 20} 只")
+
+    # 写入txt文件
+    with open(txt_filename, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(output_lines))
+
+    return txt_filename
 
 
 if __name__ == "__main__":
@@ -215,6 +273,20 @@ if __name__ == "__main__":
             print(f"  - {symbol}")
         if len(failed_symbols) > 20:
             print(f"  ... 还有 {len(failed_symbols) - 20} 只")
-    
-    save_results_to_csv(sorted_results)
+
+    # 保存结果到txt文件
+    txt_filename = save_results_to_txt(
+        results=sorted_results,
+        total_symbols=total_symbols,
+        success_count=success_count,
+        failed_count=failed_count,
+        failed_symbols=failed_symbols,
+        total_time=total_time,
+        start_date=start_date,
+        end_date=end_date
+    )
+
+    if txt_filename:
+        print(f"\n结果已保存至: {txt_filename}")
+
     print("\n=== StockPre 系统结束 ===")

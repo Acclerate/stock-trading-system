@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import sys
 import os
+import argparse
 
 # 添加项目根目录到Python路径，以便导入data模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,9 +13,72 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.data_resilient import DataResilient
 from data.cache_manager import CacheManager
 
+# ========== 股票池配置 ==========
+STOCK_POOLS = {
+    'hs300': {
+        'name': '沪深300',
+        'index_code': '000300',
+        'description': '沪深300成分股'
+    },
+    'zz500': {
+        'name': '中证500',
+        'index_code': '000905',
+        'description': '中证500成分股'
+    },
+    'zz1000': {
+        'name': '中证1000',
+        'index_code': '000852',
+        'description': '中证1000成分股'
+    },
+    'zx50': {
+        'name': '上证50',
+        'index_code': '000016',
+        'description': '上证50成分股'
+    }
+}
+
 # ========== 数据获取模块 ==========
+def get_stock_pool_symbols(pool_id='hs300'):
+    """
+    获取指定股票池的成分股代码
+
+    参数:
+        pool_id: 股票池ID (hs300/zz500/zz1000/cyb/zx50/all_a)
+
+    返回:
+        股票代码列表
+    """
+    if pool_id not in STOCK_POOLS:
+        raise ValueError(f"不支持的股票池: {pool_id}，可选: {list(STOCK_POOLS.keys())}")
+
+    pool_info = STOCK_POOLS[pool_id]
+
+    # 从缓存或API获取指数成分股
+    cache_key = f'{pool_id}_symbols'
+    cached = CacheManager.load_macro_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        # 获取指数成分股
+        index_df = ak.index_stock_cons(symbol=pool_info['index_code'])
+        index_df = index_df.drop_duplicates(subset=['品种代码'], keep='first')
+
+        # 标准化代码格式
+        symbols = index_df['品种代码'].astype(str).str.replace(r'\D', '', regex=True).str.zfill(6).tolist()
+        symbols = [f"{s}.SZ" if s.startswith(('0', '3')) else f"{s}.SH" for s in symbols]
+        symbols = list(set(symbols))  # 去重
+
+        # 保存缓存
+        CacheManager.save_macro_cache(cache_key, symbols)
+
+        return symbols
+    except Exception as e:
+        print(f"获取{pool_info['name']}成分股失败: {e}")
+        return []
+
 def fetch_stock_data(symbol, start_date, end_date):
-    """通过AKShare获取股票历史数据（日线）- 带缓存和重试"""
+    """获取股票历史数据（日线）- 带缓存和重试"""
     return DataResilient.fetch_stock_data(symbol, start_date, end_date, use_cache=True)
 
 # ========== 指标计算模块（使用 TA-Lib）==========
@@ -95,41 +159,88 @@ def backtest_strategy(df, signals):
     df['cum_returns'] = (1 + df['strategy_returns']).cumprod()
     return df
 
-# ========== 数据获取模块 ==========
-def get_hs300_symbols():
-    """获取沪深300成分股代码"""
-    return DataResilient.get_hs300_symbols(use_cache=True)
+# ========== 主程序 ==========
+def main():
+    """主程序入口"""
+    parser = argparse.ArgumentParser(
+        description='股票池筛选系统 - 基于技术指标筛选买入信号',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+支持股票池:
+  hs300   沪深300 (默认)
+  zz500   中证500
+  zz1000  中证1000
+  zx50    上证50
 
-# ========== 修改主程序 ==========
-if __name__ == "__main__":
+示例:
+  python stockPre.py              # 默认沪深300
+  python stockPre.py -p zz500     # 使用中证500
+  python stockPre.py -p zz1000    # 使用中证1000
+  python stockPre.py -p zx50      # 使用上证50
+        '''
+    )
+    parser.add_argument('-p', '--pool', type=str, default='hs300',
+                        choices=list(STOCK_POOLS.keys()),
+                        help='股票池选择 (默认: hs300)')
+    parser.add_argument('-d', '--days', type=int, default=365,
+                        help='回测天数 (默认: 365)')
+
+    args = parser.parse_args()
+
+    # 初始化
     CacheManager.initialize()
-    
-    symbols = get_hs300_symbols()
-    if not symbols:
-        raise ValueError("无法获取沪深300成分股数据")
-    
-    end_date = datetime.now().strftime("%Y%m%d")
-    start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
 
+    # 获取股票池信息
+    pool_id = args.pool
+    pool_info = STOCK_POOLS[pool_id]
+
+    print("=" * 60)
+    print(f"股票池筛选系统")
+    print("=" * 60)
+    print(f"股票池: {pool_info['name']} ({pool_info['description']})")
+    print(f"回测天数: {args.days}天")
+    print("=" * 60)
+    print()
+
+    # 获取股票池成分股
+    symbols = get_stock_pool_symbols(pool_id)
+    if not symbols:
+        raise ValueError(f"无法获取{pool_info['name']}成分股数据")
+
+    print(f"✅ 获取到 {len(symbols)} 只股票")
+    print()
+
+    # 日期设置
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=args.days)).strftime("%Y%m%d")
+
+    # 获取股票名称映射
     stock_code_name_df = DataResilient.get_stock_info(use_cache=True)
     code_name_dict = dict(zip(stock_code_name_df['code'], stock_code_name_df['name'])) if not stock_code_name_df.empty else {}
 
     results = []  # 存储所有股票结果
-    
-    for symbol in symbols:
+    failed_count = 0
+
+    # 处理每只股票
+    for idx, symbol in enumerate(symbols, 1):
         # 提取纯数字代码用于名称查询
         base_symbol = symbol.split('.')[0]
         stock_name = code_name_dict.get(base_symbol, "")
-        
+
+        # 进度显示
+        if idx % 50 == 0 or idx == len(symbols):
+            print(f"进度: {idx}/{len(symbols)} ({idx/len(symbols)*100:.1f}%)")
+
         try:
             df = fetch_stock_data(base_symbol, start_date, end_date)
             if df is None or df.empty:
+                failed_count += 1
                 continue
-                
+
             df = calculate_indicators(df)
             signals = generate_signals(df)
             df = backtest_strategy(df, signals)
-            
+
             # 只记录有买入信号的
             latest_signal = signals.iloc[-1]['signal']
             if latest_signal == 1:
@@ -143,7 +254,7 @@ if __name__ == "__main__":
                     "放量20%" if (df.loc[latest_date, 'volume_pct_change'] > 0.2) else None
                 ]
                 satisfied_conditions = [x for x in satisfied_conditions if x is not None]
-                
+
                 results.append({
                     'symbol': symbol,
                     'name': stock_name,
@@ -153,17 +264,62 @@ if __name__ == "__main__":
                     'criteria': ' + '.join(satisfied_conditions)
                 })
         except Exception as e:
-            print(f"处理 {symbol} 时出错: {str(e)}")
+            failed_count += 1
             continue
 
     # 按累计收益率排序
     sorted_results = sorted(results, key=lambda x: x['return'], reverse=True)
-    
-    # 格式化输出
-    print("\n=== 买入信号股票推荐 (按累计收益率降序) ===")
-    print(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
 
-    # 正确的输出循环
-    for item in sorted_results:
-        print(f"{item['name'][:18]:<20}{item['symbol']:<15}{item['date']:<12}"
-              f"{item['latest_price']:>6.2f}{item['return']:>8.2%}  {item['criteria']}")
+    # 创建输出目录
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 生成按日期命名的txt文件（包含股票池标识）
+    txt_filename = os.path.join(output_dir, f"{pool_id}_screen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+
+    # 准备输出内容
+    output_lines = []
+    output_lines.append("=" * 80)
+    output_lines.append(f"{pool_info['name']}成分股筛选结果")
+    output_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    output_lines.append(f"回测区间: {start_date} ~ {end_date}")
+    output_lines.append(f"筛选条件: 至少满足2个买入条件")
+    output_lines.append(f"扫描数量: {len(symbols)} 只")
+    output_lines.append(f"符合数量: {len(sorted_results)} 只")
+    output_lines.append(f"失败数量: {failed_count} 只")
+    output_lines.append("=" * 80)
+    output_lines.append("")
+
+    if sorted_results:
+        output_lines.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
+        output_lines.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
+        output_lines.append("-" * 100)
+
+        for item in sorted_results:
+            line = f"{item['name'][:18]:<20}{item['symbol']:<15}{item['date']:<12}" \
+                   f"{item['latest_price']:>6.2f}{item['return']:>8.2%}  {item['criteria']}"
+            output_lines.append(line)
+    else:
+        output_lines.append("=== 当前无符合条件的股票 ===")
+
+    output_lines.append("")
+    output_lines.append("=" * 80)
+    output_lines.append("买入条件说明:")
+    output_lines.append("  1. 均线金叉   - MA5 > MA20")
+    output_lines.append("  2. MACD金叉  - MACD > Signal")
+    output_lines.append("  3. RSI超卖   - RSI < 30")
+    output_lines.append("  4. BOLL下轨  - 收盘价 < BOLL下轨")
+    output_lines.append("  5. 放量20%   - 成交量较3日均量放大20%")
+    output_lines.append("=" * 80)
+
+    # 写入txt文件
+    with open(txt_filename, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(output_lines))
+
+    # 同时输出到控制台
+    print('\n'.join(output_lines))
+    print(f"\n结果已保存至: {txt_filename}")
+
+
+if __name__ == "__main__":
+    main()
