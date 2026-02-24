@@ -46,3 +46,4 @@ Efinance_Strategy/cache/stock/*.pkl
 Efinance_Strategy/cache/macro/*.pkl
 outputs/*.txt
 cache/*/*.pkl
+outputs/low_volume_breakout/*.txt
