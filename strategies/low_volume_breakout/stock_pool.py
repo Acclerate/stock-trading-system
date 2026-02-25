@@ -54,15 +54,14 @@ class StockPoolManager:
         Returns:
             股票代码列表（掘金格式：SHSE.600XXX, SZSE.000XXX）
         """
-        if not DIGGOLD_AVAILABLE:
-            raise RuntimeError("掘金SDK不可用，无法获取股票列表")
-
         if trade_date is None:
             trade_date = datetime.now().strftime('%Y-%m-%d')
 
         trade_date_ts = pd.Timestamp(trade_date)
 
-        print(f"获取全A股股票列表（日期: {trade_date}）...")
+        # 如果掘金SDK不可用，使用AkShare获取股票列表
+        if not DIGGOLD_AVAILABLE:
+            return self._get_all_a_stocks_akshare(trade_date, trade_date_ts)
 
         try:
             # 使用掘金SDK获取A股股票
@@ -140,11 +139,12 @@ class StockPoolManager:
         Returns:
             包含股票代码和市值的DataFrame
         """
-        if not DIGGOLD_AVAILABLE:
-            raise RuntimeError("掘金SDK不可用，无法获取市值数据")
-
         if trade_date is None:
             trade_date = datetime.now().strftime('%Y-%m-%d')
+
+        # 如果掘金SDK不可用，使用AkShare获取市值数据
+        if not DIGGOLD_AVAILABLE:
+            return self._get_market_cap_akshare(symbols, trade_date)
 
         try:
             mkt_data = stk_get_daily_mktvalue_pt(
@@ -321,6 +321,144 @@ class StockPoolManager:
         except Exception as e:
             print(f"获取股票信息失败: {e}")
             return pd.DataFrame()
+
+    def _get_all_a_stocks_akshare(self, trade_date: str, trade_date_ts: pd.Timestamp) -> List[str]:
+        """使用AkShare获取A股股票列表（备用方案）"""
+        import akshare as ak
+        print(f"使用AkShare获取A股股票列表（日期: {trade_date}）...")
+
+        try:
+            stock_info = ak.stock_zh_a_spot_em()
+            if stock_info.empty:
+                return []
+
+            def to_diggold_symbol(code):
+                code_str = str(code).zfill(6)
+                if code_str.startswith('6') or code_str.startswith('5'):
+                    return f'SHSE.{code_str}'
+                else:
+                    return f'SZSE.{code_str}'
+
+            stock_info['symbol'] = stock_info['代码'].apply(to_diggold_symbol)
+            stock_info['sec_name'] = stock_info['名称']
+
+            if self.config.skip_st:
+                stock_info = stock_info[~stock_info['名称'].str.contains('ST', case=False, na=False)]
+
+            if self.config.skip_chinext:
+                stock_info = stock_info[~stock_info['代码'].str.startswith('30')]
+                stock_info = stock_info[~stock_info['代码'].str.startswith('688')]
+
+            all_stocks = list(stock_info['symbol'])
+            self._stock_names = dict(zip(stock_info['symbol'], stock_info['sec_name']))
+
+            print(f"AkShare获取股票池数量: {len(all_stocks)}")
+            self._stock_pool = all_stocks
+            return all_stocks
+
+        except Exception as e:
+            print(f"AkShare获取股票列表失败: {e}，尝试使用baostock...")
+            return self._get_all_a_stocks_baostock(trade_date, trade_date_ts)
+
+    def _get_all_a_stocks_baostock(self, trade_date: str, trade_date_ts: pd.Timestamp) -> List[str]:
+        """使用baostock获取A股股票列表（第三备用方案）"""
+        import baostock as bs
+        print(f"使用baostock获取A股股票列表（日期: {trade_date}）...")
+
+        try:
+            lg = bs.login()
+            if lg.error_code != '0':
+                print(f"baostock登录失败: {lg.error_msg}")
+                return []
+
+            stock_info = bs.query_all_stock(day=trade_date)
+            if stock_info.error_code != '0':
+                print(f"baostock获取股票列表失败: {stock_info.error_msg}")
+                bs.logout()
+                return []
+
+            data_list = []
+            while (stock_info.error_code == '0') & stock_info.next():
+                data_list.append(stock_info.get_row_data())
+
+            if not data_list:
+                print("未获取到股票列表")
+                bs.logout()
+                return []
+
+            df = pd.DataFrame(data_list, columns=stock_info.fields)
+
+            def to_diggold_symbol(code):
+                code_parts = code.split('.')
+                if len(code_parts) != 2:
+                    return None
+                market, code_num = code_parts
+                if market == 'sh':
+                    return f'SHSE.{code_num}'
+                elif market == 'sz':
+                    return f'SZSE.{code_num}'
+                return None
+
+            df['symbol'] = df['code'].apply(to_diggold_symbol)
+            df = df[df['symbol'].notna()]
+
+            if self.config.skip_st:
+                df = df[~df['code_name'].str.contains('ST', case=False, na=False)]
+
+            if self.config.skip_chinext:
+                df = df[~df['code'].str.startswith('sz.30')]
+                df = df[~df['code'].str.startswith('sh.688')]
+
+            all_stocks = list(df['symbol'])
+            self._stock_names = dict(zip(df['symbol'], df['code_name']))
+
+            bs.logout()
+
+            print(f"baostock获取股票池数量: {len(all_stocks)}")
+            self._stock_pool = all_stocks
+            return all_stocks
+
+        except Exception as e:
+            print(f"baostock获取股票列表失败: {e}")
+            return []
+
+    def _get_market_cap_akshare(self, symbols: List[str], trade_date: str) -> pd.DataFrame:
+        """使用AkShare获取市值数据（备用方案）"""
+        import akshare as ak
+        print(f"使用AkShare获取市值数据（{len(symbols)}只股票）...")
+
+        try:
+            stock_info = ak.stock_zh_a_spot_em()
+            if stock_info.empty:
+                return pd.DataFrame(columns=['symbol', 'tot_mv'])
+
+            def to_diggold_symbol(code):
+                code_str = str(code).zfill(6)
+                if code_str.startswith('6') or code_str.startswith('5'):
+                    return f'SHSE.{code_str}'
+                else:
+                    return f'SZSE.{code_str}'
+
+            stock_info['symbol'] = stock_info['代码'].apply(to_diggold_symbol)
+            stock_info['tot_mv'] = stock_info['总市值'] / 10000
+
+            filtered = stock_info[stock_info['symbol'].isin(symbols)].copy()
+            result = filtered[
+                (filtered['tot_mv'] >= self.config.min_market_cap) &
+                (filtered['tot_mv'] <= self.config.max_market_cap)
+            ].copy()
+
+            print(f"AkShare市值筛选: {len(filtered)} -> {len(result)}")
+            return result[['symbol', 'tot_mv']]
+
+        except Exception as e:
+            print(f"AkShare获取市值数据失败: {e}，尝试使用baostock...")
+            return self._get_market_cap_baostock(symbols, trade_date)
+
+    def _get_market_cap_baostock(self, symbols: List[str], trade_date: str) -> pd.DataFrame:
+        """使用baostock获取市值数据（第三备用方案）- baostock不支持市值数据"""
+        print(f"baostock不支持市值数据，跳过市值过滤")
+        return pd.DataFrame(columns=['symbol', 'tot_mv'])
 
 
 # 便捷函数

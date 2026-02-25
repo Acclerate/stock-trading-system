@@ -38,7 +38,7 @@ STOCK_POOLS = {
 }
 
 # ========== 数据获取模块 ==========
-def get_stock_pool_symbols(pool_id='hs300'):
+def get_stock_pool_symbols(pool_id='zz500'):
     """
     获取指定股票池的成分股代码
 
@@ -179,7 +179,7 @@ def main():
   python stockPre.py -p zx50      # 使用上证50
         '''
     )
-    parser.add_argument('-p', '--pool', type=str, default='hs300',
+    parser.add_argument('-p', '--pool', type=str, default='zz500',
                         choices=list(STOCK_POOLS.keys()),
                         help='股票池选择 (默认: hs300)')
     parser.add_argument('-d', '--days', type=int, default=365,

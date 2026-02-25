@@ -103,13 +103,21 @@ class LowVolumeBreakoutStrategy:
                 if 'date' in df.columns:
                     df.set_index('date', inplace=True)
 
-                # 确保数据长度足够
-                if len(df) < self.config.min_data_points:
+                # 使用实际返回的数据，不再硬性检查最小数据点
+                # 只要数据量足够计算基本指标即可（至少250天）
+                min_required = 250
+                if len(df) < min_required:
                     # 只在第一次打印调试信息
                     if not hasattr(self, '_debug_printed'):
-                        print(f"警告: 掘金SDK只返回 {len(df)} 天数据，需要 {self.config.min_data_points} 天")
+                        print(f"警告: 掘金SDK只返回 {len(df)} 天数据，最少需要 {min_required} 天，跳过该股票")
                         self._debug_printed = True
                     return None
+
+                # 如果数据不足配置要求但足够计算，给出提示但继续处理
+                if len(df) < self.config.min_data_points:
+                    if not hasattr(self, '_data_warn_printed'):
+                        print(f"提示: 部分股票数据不足 {self.config.min_data_points} 天，将使用实际 {len(df)} 天数据计算")
+                        self._data_warn_printed = True
 
                 return df
 
@@ -464,12 +472,13 @@ def parse_arguments():
                        help='包含创业板股票（使用此参数覆盖skip-chinext）')
 
     # ==================== 策略模式选择 ====================
-    parser.add_argument('--mode', type=str, choices=['retail', 'institutional'], default='institutional',
-                       help='策略模式：retail（散户版）或institutional（机构级，默认）')
+    parser.add_argument('--mode', type=str, choices=['retail', 'institutional'], default='retail',
+                       help='策略模式：retail（散户版，默认）或institutional（机构级）')
 
     return parser.parse_args()
 
-
+# python strategies/low_volume_breakout/main.py --mode retail
+# python strategies/low_volume_breakout/main.py --mode institutional
 def main():
     """主程序入口 - 支持机构级和散户版本"""
     # 解析命令行参数
