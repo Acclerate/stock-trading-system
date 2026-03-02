@@ -16,7 +16,7 @@ load_dotenv()
 token = os.getenv('DIGGOLD_TOKEN')
 
 # 设置日志文件路径
-LOG_FILE = os.path.join(os.path.dirname(__file__), 'backtest_log_ml.txt')
+LOG_FILE = os.path.join(os.path.dirname(__file__), 'backtest_log_ml_strategy.txt')
 
 class Logger:
     def __init__(self, filename):
@@ -215,7 +215,7 @@ if __name__ == '__main__':
     backtest_start_time = '2025-02-01 09:30:00'
     backtest_end_time = '2026-02-28 15:00:00'
     run(strategy_id='strategy_id',
-        filename='机器学习(股票)',
+        filename='ml_strategy',
         mode=MODE_BACKTEST,
         token=token,
         backtest_start_time=backtest_start_time,

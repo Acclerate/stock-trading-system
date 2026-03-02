@@ -173,13 +173,13 @@ def main():
   zx50    上证50
 
 示例:
-  python stockPre.py              # 默认沪深300
+  python stockPre.py -p hs300     # 默认沪深300
   python stockPre.py -p zz500     # 使用中证500
   python stockPre.py -p zz1000    # 使用中证1000
   python stockPre.py -p zx50      # 使用上证50
         '''
     )
-    parser.add_argument('-p', '--pool', type=str, default='zz500',
+    parser.add_argument('-p', '--pool', type=str, default='hs300',
                         choices=list(STOCK_POOLS.keys()),
                         help='股票池选择 (默认: hs300)')
     parser.add_argument('-d', '--days', type=int, default=365,

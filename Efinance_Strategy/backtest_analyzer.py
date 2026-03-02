@@ -42,28 +42,36 @@ class BacktestAnalyzer:
             price = float(match.group(4))
             target_percent = float(match.group(5))
 
-            # 对于市价单，如果委托价格为0，记录一下，后续回测逻辑里可能需要处理
-            # 真实成交价在回测里可能需要另外的日志获取，但在现有框架下先跑通
+            # 将百分比值转换为小数形式（如100 -> 1.0, 4.27 -> 0.0427）
+            target_percent_decimal = target_percent / 100.0
+
             trade = {
                 'datetime': pd.to_datetime(date_str),
                 'date': pd.to_datetime(date_str).date(),
                 'symbol': symbol,
                 'action': action,
                 'price': price,
-                'target_percent': target_percent
+                'target_percent': target_percent_decimal  # 使用小数形式
             }
             self.trades.append(trade)
 
         self.trades = pd.DataFrame(self.trades)
         if not self.trades.empty:
-            self.trades = self.trades.sort_values('datetime').reset_index(drop=True)
+            # 去重：日志可能重复输出
+            self.trades = self.trades.drop_duplicates().sort_values('datetime').reset_index(drop=True)
 
         return self.trades
 
     def calculate_position_value(self, price: float, percent: float, cash: float) -> Tuple[float, float]:
-        """计算持仓价值和使用的现金"""
-        total_assets = cash / 0.8  # 简化计算假设总仓位是80%
-        position_value = total_assets * (percent / 100)
+        """
+        计算持仓价值和使用的现金
+        percent: 目标仓位占比（小数形式，如1.0表示100%，0.05表示5%）
+        """
+        if percent >= 0.99:  # 100%全仓，直接使用所有可用资金
+            position_value = cash / (1 + self.commission_rate)
+        else:  # 部分仓位，假设现金占总资产的(1-percent)，计算总资产
+            total_assets = cash / (1 - percent) if percent < 1 else cash
+            position_value = total_assets * percent
         return position_value, position_value * (1 + self.commission_rate)
 
     def calculate_returns(self) -> pd.DataFrame:
@@ -75,9 +83,16 @@ class BacktestAnalyzer:
                               end=self.trades['datetime'].max(),
                               freq='D')
 
-        positions = {}
+        positions = {}  # {symbol: {'shares': float, 'buy_price': float}}
         cash = self.initial_cash
         daily_values = []
+
+        def get_total_asset():
+            """计算总资产（现金 + 持仓市值）"""
+            total = cash
+            for symbol, pos in positions.items():
+                total += pos['shares'] * pos['buy_price']  # 使用买入价作为持仓价值
+            return total
 
         for date in dates:
             day_trades = self.trades[self.trades['datetime'].dt.date == date.date()]
@@ -86,32 +101,38 @@ class BacktestAnalyzer:
                 symbol = trade['symbol']
                 action = trade['action']
                 price = trade['price']
-                percent = trade['target_percent']
+                percent = trade['target_percent']  # 小数形式，如1.0表示100%
 
-                if action == '开多仓':  
-                    position_value, cost = self.calculate_position_value(price, percent, cash)
-                    # 避免价格为0导致除零错误(市价单记录的委托价可能是0)
-                    calc_price = price if price > 0 else 1.0 
-                    shares = position_value / calc_price
+                if action == '开多仓':
+                    # 计算总资产，然后按目标仓位比例买入
+                    total_asset = get_total_asset()
+
+                    if percent >= 0.99:  # 100%全仓，使用所有可用资金
+                        buy_amount = cash / (1 + self.commission_rate)
+                    else:  # 部分仓位
+                        buy_amount = total_asset * percent
+                        # 确保不超过可用资金
+                        if buy_amount * (1 + self.commission_rate) > cash:
+                            buy_amount = cash / (1 + self.commission_rate)
+
+                    calc_price = price if price > 0 else 1.0
+                    cost = buy_amount * (1 + self.commission_rate)
+                    shares = buy_amount / calc_price
+
                     cash -= cost
-
                     positions[symbol] = {
-                        'buy_price': calc_price,
                         'shares': shares,
-                        'value': position_value
+                        'buy_price': calc_price
                     }
 
-                elif action == '平多仓':  
+                elif action == '平多仓':
                     if symbol in positions:
                         calc_price = price if price > 0 else positions[symbol]['buy_price']
                         sell_value = positions[symbol]['shares'] * calc_price
                         cash += sell_value * (1 - self.commission_rate)
                         del positions[symbol]
 
-            total_value = cash
-            for pos in positions.values():
-                total_value += pos['value']
-
+            total_value = get_total_asset()
             daily_values.append({
                 'date': date,
                 'cash': cash,

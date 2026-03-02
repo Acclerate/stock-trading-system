@@ -456,8 +456,12 @@ def parse_arguments():
                        help='输出目录，默认outputs/low_volume_breakout')
 
     # ==================== 机构级过滤参数 ====================
+    parser.add_argument('--trend-filter', action='store_true', default=False,
+                       help='启用趋势过滤（MA20>MA60）')
     parser.add_argument('--no-trend-filter', action='store_true', default=False,
                        help='禁用趋势过滤（MA20>MA60）')
+    parser.add_argument('--volume-progressive', action='store_true', default=False,
+                       help='启用量能递进验证（VOL5>VOL20>VOL60）')
     parser.add_argument('--no-volume-progressive', action='store_true', default=False,
                        help='禁用量能递进验证（VOL5>VOL20>VOL60）')
     parser.add_argument('--min-turnover', type=float, default=None,
@@ -477,6 +481,25 @@ def parse_arguments():
 
     return parser.parse_args()
 
+#  # 散户版（默认关闭这两个过滤）
+#   python strategies/low_volume_breakout/main.py
+
+#   # 散户版 + 启用趋势过滤
+#   python strategies/low_volume_breakout/main.py --trend-filter
+
+#   # 散户版 + 启用量能递进
+#   python strategies/low_volume_breakout/main.py --volume-progressive
+
+#   # 散户版 + 同时启用两个过滤
+#   python strategies/low_volume_breakout/main.py --trend-filter --volume-progressive
+
+#   # 机构版（默认启用），禁用某个过滤
+#   python strategies/low_volume_breakout/main.py --mode institutional --no-trend-filter
+
+#   # 完整示例
+#   python strategies/low_volume_breakout/main.py --trend-filter --volume-progressive --min-cap 30 --top-n 20
+
+
 # python strategies/low_volume_breakout/main.py --mode retail
 # python strategies/low_volume_breakout/main.py --mode institutional
 def main():
@@ -486,18 +509,18 @@ def main():
 
     # 根据模式选择配置
     if args.mode == 'retail':
-        # 散户版配置（更宽松的参数）
+        # 散户版配置（默认关闭可选过滤，参数较宽松）
         config_kwargs = {
             'min_market_cap': 20.0,
             'max_market_cap': 500.0,
             'low_threshold': 0.6,
             'volume_ratio': 1.5,
-            'require_trend_filter': False,
-            'min_turnover_rate': 0.0,
-            'max_volatility_20d': 1.0,
-            'require_volume_progressive': False,
+            'require_trend_filter': False,         # 默认关闭，可通过--trend-filter启用
+            'require_volume_progressive': False,   # 默认关闭，可通过--volume-progressive启用
+            'min_turnover_rate': 0.005,            # 换手率要求 0.5%（机构版1%）
+            'max_volatility_20d': 0.50,            # 波动率限制 50%（机构版30%）
         }
-        print("使用散户版策略配置（参数较宽松）")
+        print("使用散户版策略配置（可选过滤条件默认关闭）")
     else:
         # 机构级配置（默认）
         config_kwargs = {}
@@ -523,8 +546,12 @@ def main():
         config_kwargs['top_n'] = args.top_n
 
     # 机构级参数覆盖
+    if args.trend_filter:
+        config_kwargs['require_trend_filter'] = True
     if args.no_trend_filter:
         config_kwargs['require_trend_filter'] = False
+    if args.volume_progressive:
+        config_kwargs['require_volume_progressive'] = True
     if args.no_volume_progressive:
         config_kwargs['require_volume_progressive'] = False
     if args.min_turnover is not None:
