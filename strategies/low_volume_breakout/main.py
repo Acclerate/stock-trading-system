@@ -426,7 +426,7 @@ class LowVolumeBreakoutStrategy:
 def parse_arguments():
     """解析命令行参数 - 机构级版本"""
     parser = argparse.ArgumentParser(
-        description='低位放量突破策略（机构级版本）- 寻找长期低位震荡后逐步放量的中小盘股票'
+        description='低位放量突破策略- 寻找长期低位震荡后逐步放量的中小盘股票'
     )
 
     # 策略参数（默认值None时使用config.py中的默认值）
