@@ -34,7 +34,7 @@ data/config_data_source.py
 .env.local
 
 # Documents
-*.md
+# *.md
 
 # Cache
 cache/*.pkl
