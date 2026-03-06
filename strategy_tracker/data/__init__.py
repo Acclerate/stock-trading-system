@@ -11,7 +11,7 @@ from .parser import (
     parse_directory,
     get_strategy_from_filename
 )
-from .collector import DataCollector, BenchmarkCollector
+from .collector import DataCollector, BenchmarkCollector, DbDataSource
 
 __all__ = [
     'BaseParser',
@@ -24,4 +24,5 @@ __all__ = [
     'get_strategy_from_filename',
     'DataCollector',
     'BenchmarkCollector',
+    'DbDataSource',
 ]

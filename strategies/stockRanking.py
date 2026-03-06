@@ -8,12 +8,18 @@ import sys
 import os
 import traceback
 import threading
+import json
+from pathlib import Path
 
 # 添加项目根目录到Python路径，以便导入data模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 使用掘金SDK数据模块
 from data.data_resilient import DataResilient
+
+# ========== 统一输出工具 ==========
+from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+from strategy_tracker.db.repository import get_repository
 
 # ========== 数据获取模块 ==========
 def fetch_stock_data(symbol, start_date, end_date):
@@ -353,14 +359,35 @@ if __name__ == "__main__":
         print(f"{quarter}: 同比{row['国内生产总值-同比增长']:.2f}% 绝对值{row['国内生产总值-绝对值']/1e4:.2f}万亿")
     
     # 三个实验组：粗排高信号；持有观测；粗排信号+自选低位股
-    symbols = ["600489","600938","600919","601857","600600",
-               "601088","002304","002007","600905","600048",
-               "601872","601012","002737","600009","000538"]
+    # 从配置文件读取股票列表
+    config_path = Path(__file__).parent.parent / "config" / "stock_ranking.json"
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                stocks = config.get('stocks', [])
+                symbols = [stock['code'] for stock in stocks]
+                description = config.get('description', '多维评分分析股票池')
+                print(f"✅ 从配置文件加载 {len(symbols)} 只股票: {description}")
+        except Exception as e:
+            print(f"⚠️  配置文件读取失败，使用默认股票列表: {e}")
+            symbols = ["600489","600938","600919","601857","600600",
+                       "601088","002304","002007","600905","600048",
+                       "601872","601012","002737","600009","000538"]
+    else:
+        print("⚠️  配置文件不存在，使用默认股票列表")
+        symbols = ["600489","600938","600919","601857","600600",
+                   "601088","002304","002007","600905","600048",
+                   "601872","601012","002737","600009","000538"]
+    
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
 
     # 使用已缓存的股票名称映射（DataCache.stock_names已在前面获取）
     code_name_dict = DataCache.stock_names
+
+    # 收集所有结果
+    all_results = []
 
     def process_symbol(symbol):
         try:
@@ -415,18 +442,176 @@ if __name__ == "__main__":
             with print_lock:
                 print('\n'.join(output))
             
+            # 返回结果用于统一输出
+            return {
+                'symbol': symbol,
+                'name': stock_name,
+                'date': latest_date,
+                'price': latest_price,
+                'action': action,
+                'buy_score': latest_score['buy_score'],
+                'sell_pressure': latest_score['sell_pressure'],
+                'buy_threshold': buy_threshold,
+                'sell_threshold': sell_threshold,
+                'macd_momentum': latest_score['macd_momentum'],
+                'boll_score': latest_score['boll_score'],
+                'rsi_divergence': latest_score['rsi_divergence'],
+                'volume_score': latest_score['volume_score'],
+                'macro_score': latest_score['macro_score'],
+                'trend_decay': latest_score['trend_decay'],
+                'overbought': latest_score['overbought'],
+                'capital_outflow': latest_score['capital_outflow'],
+                'drawdown_pressure': latest_score['drawdown_pressure'],
+                'cum_returns': df['cum_returns'].iloc[-1]
+            }
+            
         except Exception as e:
             print(f"处理{symbol}时发生错误: {str(e)}")
+            return None
 
     # 使用多线程加速（正确缩进）
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(process_symbol, symbol) for symbol in symbols]
         for future in as_completed(futures):
             try:
-                future.result()
+                result = future.result()
+                if result:
+                    all_results.append(result)
             except KeyboardInterrupt:
                 print("用户手动中断，正在优雅关闭...")
                 sys.exit(1)
             except Exception as e:
                 print(f"发生未知错误: {e}")
-                traceback.print_exc()        
+                traceback.print_exc()
+    
+    # ========== 使用统一输出工具保存结果 ==========
+    print("\n正在保存结果...")
+    
+    # 按买入评分排序
+    sorted_results = sorted(all_results, key=lambda x: x['buy_score'], reverse=True)
+    
+    # 创建策略元数据
+    metadata = StrategyMetadata(
+        strategy_name="股票多维评分分析",
+        strategy_type="stock_ranking",
+        screen_date=datetime.now(),
+        generated_at=datetime.now(),
+        scan_count=len(symbols),
+        match_count=len(sorted_results),
+        strategy_params={
+            'backtest_days': 365,
+            'data_source': 'DataResilient',
+            'thread_count': 8
+        },
+        filter_conditions="基于多维评分系统（买入评分/卖出压力）",
+        scan_scope="固定股票池（15只）"
+    )
+
+    # 创建输出管理器
+    output_mgr = StrategyOutputManager(metadata)
+
+    # 添加股票数据
+    for r in sorted_results:
+        # 判断操作建议
+        action = "持有"
+        if r['buy_score'] >= r['buy_threshold']:
+            action = "买入"
+        elif r['sell_pressure'] >= r['sell_threshold']:
+            action = "卖出"
+        
+        # 构建买入条件说明
+        buy_conditions = []
+        if r['macd_momentum'] > 0:
+            buy_conditions.append("MACD金叉")
+        if r['boll_score'] > 0.5:
+            buy_conditions.append("BOLL下轨")
+        if r['rsi_divergence'] > 0:
+            buy_conditions.append("RSI超卖")
+        if r['volume_score'] > 0:
+            buy_conditions.append("放量")
+        if r['macro_score'] > 0.05:
+            buy_conditions.append("宏观利好")
+        
+        reason = ' + '.join(buy_conditions) if buy_conditions else action
+        
+        stock = StockData(
+            stock_code=r['symbol'],
+            stock_name=r['name'],
+            screen_price=r['price'],
+            score=r['buy_score'] * 100,  # 转换为百分比
+            reason=reason,
+            extra_fields={
+                'date': r['date'],
+                'action': r['action'],
+                'buy_score': r['buy_score'],
+                'sell_pressure': r['sell_pressure'],
+                'buy_threshold': r['buy_threshold'],
+                'sell_threshold': r['sell_threshold'],
+                'macd_momentum': r['macd_momentum'],
+                'boll_score': r['boll_score'],
+                'rsi_divergence': r['rsi_divergence'],
+                'volume_score': r['volume_score'],
+                'macro_score': r['macro_score'],
+                'trend_decay': r['trend_decay'],
+                'overbought': r['overbought'],
+                'capital_outflow': r['capital_outflow'],
+                'drawdown_pressure': r['drawdown_pressure'],
+                'cum_returns': r['cum_returns']
+            }
+        )
+        output_mgr.add_stock(stock)
+
+    # 自定义表格格式化函数
+    def format_ranking_table(stocks):
+        rows = []
+        if stocks:
+            rows.append("=== 股票多维评分分析结果（按买入评分降序）===")
+            rows.append(
+                f"{'代码':<8}{'名称':<12}{'日期':<12}{'价格':<8}{'操作':<12}{'买入评分':<12}{'卖出压力':<12}"
+                f"{'收益率':<10}{'买入条件'}"
+            )
+            rows.append("-" * 120)
+
+            for s in stocks:
+                extra = s.extra_fields
+                action = extra.get('action', '持有')
+                
+                # 构建买入条件说明
+                buy_conditions = []
+                if extra.get('macd_momentum', 0) > 0:
+                    buy_conditions.append("MACD")
+                if extra.get('boll_score', 0) > 0.5:
+                    buy_conditions.append("BOLL")
+                if extra.get('rsi_divergence', 0) > 0:
+                    buy_conditions.append("RSI")
+                if extra.get('volume_score', 0) > 0:
+                    buy_conditions.append("放量")
+                if extra.get('macro_score', 0) > 0.05:
+                    buy_conditions.append("宏观")
+                
+                conditions_str = ' + '.join(buy_conditions) if buy_conditions else '-'
+                
+                line = (
+                    f"{s.stock_code:<8}{s.stock_name[:10]:<12}{extra.get('date', 'N/A'):<12}"
+                    f"{s.screen_price:>6.2f}  {action:<12}{extra.get('buy_score', 0):>10.2f}  "
+                    f"{extra.get('sell_pressure', 0):>10.2f}  {extra.get('cum_returns', 0):>8.2%}  "
+                    f"{conditions_str}"
+                )
+                rows.append(line)
+        else:
+            rows.append("=== 无分析结果 ===")
+        return rows
+
+    # 同时输出所有格式
+    try:
+        repo = get_repository()
+        results = output_mgr.output_all(repo=repo, table_formatter=format_ranking_table)
+        print(f"✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        print(f"✓ 数据库记录ID: {results['screening_id']}")
+    except Exception as e:
+        # 如果数据库操作失败，至少输出文件
+        print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+        results = output_mgr.output_all(table_formatter=format_ranking_table)
+        print(f"✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")

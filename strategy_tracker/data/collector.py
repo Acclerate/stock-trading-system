@@ -1,7 +1,7 @@
 """
 数据采集器
 获取历史价格数据和基准指数数据
-优先从缓存读取数据，避免网络请求失败
+支持多种数据源：缓存、数据库(DataResilient)、stock_tracker.db
 """
 import sys
 import os
@@ -17,6 +17,7 @@ sys.path.insert(0, str(project_root))
 
 from data.data_resilient import DataResilient
 from strategy_tracker.config import BENCHMARK_INDEX, DATE_FORMAT_COMPACT
+from strategy_tracker.db import get_repository
 
 
 # ========== 工具函数 ==========
@@ -496,3 +497,427 @@ class BenchmarkCollector:
             return 0
 
         return self.collect_and_store(start_date, end_date)
+
+
+class DbDataSource:
+    """
+    数据库数据源 - 从 stock_tracker.db 直接读取历史数据
+    作为独立的数据获取方式，优先级可配置
+    """
+
+    def __init__(self, repository=None):
+        """
+        初始化数据库数据源
+
+        Args:
+            repository: 数据库仓库实例，如果为None则自动获取
+        """
+        self.repository = repository or get_repository()
+
+    def get_stock_price_from_db(
+        self,
+        stock_code: str,
+        check_date: datetime,
+        holding_days: int
+    ) -> Optional[float]:
+        """
+        从数据库获取股票在指定持仓天数后的收盘价
+        读取 return_records 表中已计算的历史价格
+
+        Args:
+            stock_code: 股票代码
+            check_date: 检查日期（筛选日期 + holding_days）
+            holding_days: 持仓天数
+
+        Returns:
+            收盘价，如果未找到返回None
+        """
+        try:
+            from sqlalchemy import and_
+
+            with self.repository.get_session() as session:
+                # 通过股票代码和检查日期查找收益记录
+                result = session.query(
+                    ReturnRecord, StockPosition, ScreeningRecord
+                ).join(
+                    StockPosition, ReturnRecord.position_id == StockPosition.id
+                ).join(
+                    ScreeningRecord, StockPosition.screening_id == ScreeningRecord.id
+                ).filter(
+                    and_(
+                        StockPosition.stock_code == stock_code,
+                        ReturnRecord.holding_days == holding_days,
+                        _date_filter(ReturnRecord.check_date, check_date)
+                    )
+                ).first()
+
+                if result and result[0].close_price:
+                    return float(result[0].close_price)
+
+            return None
+
+        except Exception as e:
+            print(f"从数据库获取 {stock_code} 价格失败: {e}")
+            return None
+
+    def get_stock_prices_history_from_db(
+        self,
+        stock_code: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Optional[Dict[int, float]]:
+        """
+        从数据库获取股票的历史价格数据（按持仓天数）
+
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            字典 {holding_days: close_price}，如果未找到返回None
+        """
+        try:
+            from sqlalchemy import and_
+
+            with self.repository.get_session() as session:
+                results = session.query(
+                    ReturnRecord, StockPosition
+                ).join(
+                    StockPosition, ReturnRecord.position_id == StockPosition.id
+                ).filter(
+                    and_(
+                        StockPosition.stock_code == stock_code,
+                        ReturnRecord.check_date >= start_date,
+                        ReturnRecord.check_date <= end_date,
+                        ReturnRecord.close_price.isnot(None)
+                    )
+                ).all()
+
+                if results:
+                    return {r[0].holding_days: float(r[0].close_price) for r in results}
+
+            return None
+
+        except Exception as e:
+            print(f"从数据库获取 {stock_code} 历史价格失败: {e}")
+            return None
+
+    def get_benchmark_price_from_db(self, trade_date: datetime) -> Optional[float]:
+        """
+        从数据库获取基准指数在指定日期的收盘价
+
+        Args:
+            trade_date: 交易日期
+
+        Returns:
+            收盘价，如果未找到返回None
+        """
+        try:
+            data = self.repository.get_benchmark_by_date(trade_date)
+            if data and data.close_price:
+                return float(data.close_price)
+            return None
+
+        except Exception as e:
+            print(f"从数据库获取基准价格失败: {e}")
+            return None
+
+    def get_benchmark_prices_range_from_db(
+        self,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Optional[pd.DataFrame]:
+        """
+        从数据库获取基准指数在日期范围内的数据
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            包含OHLCV数据的DataFrame
+        """
+        try:
+            data_list = self.repository.get_benchmark_data(start_date, end_date)
+
+            if not data_list:
+                return None
+
+            # 转换为DataFrame
+            data = {
+                'open': [d.open_price for d in data_list],
+                'close': [d.close_price for d in data_list],
+                'high': [d.high_price for d in data_list],
+                'low': [d.low_price for d in data_list],
+                'volume': [d.volume for d in data_list],
+            }
+            df = pd.DataFrame(data, index=[d.trade_date for d in data_list])
+            df.index.name = 'date'
+
+            return df
+
+        except Exception as e:
+            print(f"从数据库获取基准历史数据失败: {e}")
+            return None
+
+    def calculate_benchmark_return_from_db(
+        self,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Optional[float]:
+        """
+        从数据库计算基准收益率
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            基准收益率（%），如果计算失败返回None
+        """
+        return self.repository.calculate_benchmark_return(start_date, end_date)
+
+    def is_trading_day_from_db(self, date: datetime) -> bool:
+        """
+        从数据库判断是否为交易日
+
+        Args:
+            date: 待检查的日期
+
+        Returns:
+            是否为交易日
+        """
+        try:
+            data = self.repository.get_benchmark_by_date(date)
+            return data is not None
+
+        except Exception:
+            return False
+
+    def get_available_stock_codes(self) -> List[str]:
+        """
+        获取数据库中所有有记录的股票代码（已去重）
+
+        Returns:
+            股票代码列表（去重后）
+        """
+        try:
+            from sqlalchemy import distinct
+
+            with self.repository.get_session() as session:
+                codes = session.query(distinct(StockPosition.stock_code)).all()
+                return sorted([c[0] for c in codes])
+
+        except Exception:
+            return []
+
+    def get_stock_codes_by_strategy(
+        self,
+        strategy_type: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[str]:
+        """
+        按策略类型获取股票代码（已去重）
+
+        Args:
+            strategy_type: 策略类型
+            start_date: 开始日期（可选）
+            end_date: 结束日期（可选）
+
+        Returns:
+            股票代码列表（去重后）
+        """
+        try:
+            from sqlalchemy import distinct, and_
+
+            with self.repository.get_session() as session:
+                query = session.query(
+                    distinct(StockPosition.stock_code)
+                ).join(
+                    ScreeningRecord, StockPosition.screening_id == ScreeningRecord.id
+                ).filter(
+                    ScreeningRecord.strategy_type == strategy_type
+                )
+
+                if start_date:
+                    query = query.filter(ScreeningRecord.screen_date >= start_date)
+                if end_date:
+                    query = query.filter(ScreeningRecord.screen_date <= end_date)
+
+                codes = query.all()
+                return sorted([c[0] for c in codes])
+
+        except Exception as e:
+            print(f"获取策略 {strategy_type} 股票代码失败: {e}")
+            return []
+
+    def get_stock_codes_by_date_range(
+        self,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[str]:
+        """
+        按日期范围获取股票代码（已去重）
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            股票代码列表（去重后）
+        """
+        try:
+            from sqlalchemy import distinct
+
+            with self.repository.get_session() as session:
+                codes = session.query(
+                    distinct(StockPosition.stock_code)
+                ).filter(
+                    StockPosition.screen_date >= start_date,
+                    StockPosition.screen_date <= end_date
+                ).all()
+                return sorted([c[0] for c in codes])
+
+        except Exception as e:
+            print(f"获取日期范围股票代码失败: {e}")
+            return []
+
+    def get_latest_screening_stocks(
+        self,
+        strategy_type: Optional[str] = None,
+        limit_days: int = 7
+    ) -> List[Dict[str, Any]]:
+        """
+        获取最新的筛选股票列表（去重）
+
+        Args:
+            strategy_type: 策略类型（为空则获取所有策略）
+            limit_days: 限制最近多少天的筛选记录
+
+        Returns:
+            股票信息列表 [{stock_code, stock_name, latest_screen_date, count}, ...]
+        """
+        try:
+            from sqlalchemy import and_, func
+            from datetime import timedelta
+
+            cutoff_date = datetime.now() - timedelta(days=limit_days)
+
+            with self.repository.get_session() as session:
+                # 构建查询
+                query = session.query(
+                    StockPosition.stock_code,
+                    StockPosition.stock_name,
+                    func.max(StockPosition.screen_date).label('latest_date'),
+                    func.count(StockPosition.id).label('screen_count')
+                ).filter(
+                    StockPosition.screen_date >= cutoff_date
+                )
+
+                if strategy_type:
+                    query = query.join(
+                        ScreeningRecord, StockPosition.screening_id == ScreeningRecord.id
+                    ).filter(
+                        ScreeningRecord.strategy_type == strategy_type
+                    )
+
+                # 按股票代码分组，实现去重
+                result = query.group_by(
+                    StockPosition.stock_code,
+                    StockPosition.stock_name
+                ).order_by(
+                    func.max(StockPosition.screen_date).desc()
+                ).all()
+
+                return [
+                    {
+                        'stock_code': r.stock_code,
+                        'stock_name': r.stock_name,
+                        'latest_screen_date': r.latest_date,
+                        'count': r.screen_count
+                    }
+                    for r in result
+                ]
+
+        except Exception as e:
+            print(f"获取最新筛选股票失败: {e}")
+            return []
+
+    def get_stocks_with_return_stats(
+        self,
+        holding_days: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取有收益记录的股票列表（已去重）
+
+        Args:
+            holding_days: 持仓天数（为空则获取所有）
+
+        Returns:
+            股票统计信息列表
+        """
+        try:
+            from sqlalchemy import distinct, func
+
+            with self.repository.get_session() as session:
+                query = session.query(
+                    distinct(StockPosition.stock_code),
+                    StockPosition.stock_name,
+                    func.avg(ReturnRecord.return_rate).label('avg_return'),
+                    func.count(ReturnRecord.id).label('return_count')
+                ).join(
+                    ReturnRecord, StockPosition.id == ReturnRecord.position_id
+                )
+
+                if holding_days:
+                    query = query.filter(ReturnRecord.holding_days == holding_days)
+
+                result = query.group_by(
+                    StockPosition.stock_code,
+                    StockPosition.stock_name
+                ).all()
+
+                return [
+                    {
+                        'stock_code': r.stock_code,
+                        'stock_name': r.stock_name,
+                        'avg_return': float(r.avg_return) if r.avg_return else None,
+                        'return_count': r.return_count
+                    }
+                    for r in result
+                ]
+
+        except Exception as e:
+            print(f"获取收益统计股票失败: {e}")
+            return []
+
+    def get_db_date_range(self) -> Optional[tuple]:
+        """
+        获取数据库中数据的日期范围
+
+        Returns:
+            (earliest_date, latest_date) 或 None
+        """
+        try:
+            from sqlalchemy import func
+
+            with self.repository.get_session() as session:
+                # 检查基准数据
+                result = session.query(
+                    func.min(BenchmarkData.trade_date),
+                    func.max(BenchmarkData.trade_date)
+                ).first()
+
+                if result and result[0] and result[1]:
+                    return (result[0], result[1])
+
+            return None
+
+        except Exception:
+            return None
+
+
+# 导入需要的模型类（放在文件末尾避免循环导入）
+from strategy_tracker.db.models import ReturnRecord, StockPosition, ScreeningRecord, BenchmarkData
