@@ -51,6 +51,13 @@ class DataResilient:
     """数据获取类 - 掘金SDK优先"""
 
     @staticmethod
+    def _is_index(symbol: str) -> bool:
+        """判断是否为指数代码"""
+        # 主要指数代码
+        index_codes = ['000300', '000905', '000852', '000001', '399001', '399006']
+        return symbol in index_codes or symbol in ['300', '905', '852']
+
+    @staticmethod
     def fetch_stock_data(symbol: str, start_date: str, end_date: str, use_cache: bool = True) -> pd.DataFrame:
         """
         获取股票历史数据
@@ -63,8 +70,11 @@ class DataResilient:
             if cached_data is not None:
                 return cached_data
 
-        # 2. 从数据源获取
-        df = DataResilient._fetch_with_multi_source(symbol, start_date, end_date)
+        # 2. 从数据源获取（区分指数和股票）
+        if DataResilient._is_index(symbol):
+            df = DataResilient._fetch_index_data(symbol, start_date, end_date)
+        else:
+            df = DataResilient._fetch_with_multi_source(symbol, start_date, end_date)
 
         # 3. 保存到缓存
         if use_cache and df is not None and not df.empty:
@@ -150,6 +160,124 @@ class DataResilient:
                         break
 
         raise ValueError(f"所有数据源均失败: {symbol}")
+
+    @staticmethod
+    def _fetch_index_data(symbol: str, start_date: str, end_date: str, max_retries: int = 3) -> pd.DataFrame:
+        """
+        获取指数数据（沪深300等）
+
+        优先使用 AkShare 的指数接口
+        """
+        # 标准化指数代码（确保6位）
+        if len(symbol) == 3:
+            symbol = symbol.zfill(6)
+
+        # 转换日期格式: YYYYMMDD -> YYYY-MM-DD
+        start_date_fmt = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
+        end_date_fmt = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+
+        # 映射指数代码到 akshare 格式
+        index_mapping = {
+            '000300': 'sh000300',  # 沪深300
+            '000905': 'sh000905',  # 中证500
+            '000852': 'sh000852',  # 中证1000
+            '000001': 'sh000001',  # 上证指数
+            '399001': 'sz399001',  # 深证成指
+            '399006': 'sz399006',  # 创业板指
+        }
+
+        akshare_symbol = index_mapping.get(symbol, f'sh{symbol}')
+
+        # 尝试多个数据源
+        for attempt in range(max_retries + 1):
+            try:
+                # 方法1: 使用 stock_zh_index_daily（推荐）
+                print(f"尝试使用 AkShare 获取指数 {symbol} 数据...")
+                df = ak.stock_zh_index_daily(symbol=akshare_symbol)
+
+                if df is None or df.empty:
+                    raise ValueError(f"AkShare 返回空数据: {symbol}")
+
+                # 筛选日期范围
+                df = DataResilient._standardize_dataframe(df)
+                start_dt = pd.to_datetime(start_date_fmt)
+                end_dt = pd.to_datetime(end_date_fmt)
+                df = df[(df.index >= start_dt) & (df.index <= end_dt)]
+
+                if df.empty:
+                    raise ValueError(f"日期筛选后数据为空: {start_date_fmt} ~ {end_date_fmt}")
+
+                print(f"成功使用 AkShare 获取指数 {symbol} 数据: {len(df)} 条")
+                return df
+
+            except Exception as e:
+                if attempt < max_retries:
+                    delay = random.uniform(1, 2)
+                    print(f"  获取指数数据失败，重试中... ({str(e)[:50]})")
+                    time.sleep(delay)
+                else:
+                    print(f"  获取指数数据失败: {str(e)[:50]}")
+                    # 最后尝试使用掘金SDK
+                    try:
+                        if DIGGOLD_AVAILABLE:
+                            return DataResilient._fetch_index_from_diggold(symbol, start_date, end_date)
+                    except:
+                        pass
+                    raise ValueError(f"所有指数数据源均失败: {symbol}")
+
+        return pd.DataFrame()
+
+    @staticmethod
+    def _fetch_index_from_diggold(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """使用掘金SDK获取指数数据"""
+        if not DIGGOLD_AVAILABLE:
+            raise ValueError("掘金SDK未安装或未初始化")
+
+        # 转换日期格式
+        start_date_diggold = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
+        end_date_diggold = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+
+        # 指数代码映射（掘金格式）
+        index_mapping = {
+            '000300': 'SHSE.000300',
+            '000905': 'SHSE.000905',
+            '000852': 'SHSE.000852',
+            '000001': 'SHSE.000001',
+            '399001': 'SZSE.399001',
+            '399006': 'SZSE.399006',
+        }
+
+        diggold_symbol = index_mapping.get(symbol, f'SHSE.{symbol}')
+
+        # 获取数据
+        data = history(
+            symbol=diggold_symbol,
+            frequency='1d',
+            start_time=start_date_diggold,
+            end_time=end_date_diggold,
+            adjust=0,  # 指数不复权
+            df=True
+        )
+
+        if data.empty:
+            raise ValueError(f"掘金SDK返回空数据: {symbol}")
+
+        # 处理日期列
+        if 'eob' in data.columns:
+            data['date'] = pd.to_datetime(data['eob'])
+            data = data.drop(columns=['eob'])
+        elif 'bob' in data.columns:
+            data['date'] = pd.to_datetime(data['bob'])
+            data = data.drop(columns=['bob'])
+
+        if 'date' in data.columns:
+            data.set_index('date', inplace=True)
+
+        # 只保留需要的列
+        required_cols = ['open', 'high', 'low', 'close', 'volume']
+        available_cols = [col for col in required_cols if col in data.columns]
+
+        return data[available_cols]
 
     @staticmethod
     def _fetch_from_diggold(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:

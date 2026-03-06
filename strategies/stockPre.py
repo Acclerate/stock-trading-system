@@ -13,6 +13,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.data_resilient import DataResilient
 from data.cache_manager import CacheManager
 
+
+# ========== 使用统一输出工具 ==========
+from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+from strategy_tracker.db.repository import get_repository
+
 # ========== 股票池配置 ==========
 STOCK_POOLS = {
     'hs300': {
@@ -179,7 +184,7 @@ def main():
   python stockPre.py -p zx50      # 使用上证50
         '''
     )
-    parser.add_argument('-p', '--pool', type=str, default='zz500',
+    parser.add_argument('-p', '--pool', type=str, default='hs300',
                         choices=list(STOCK_POOLS.keys()),
                         help='股票池选择 (默认: hs300)')
     parser.add_argument('-d', '--days', type=int, default=365,
@@ -270,55 +275,95 @@ def main():
     # 按累计收益率排序
     sorted_results = sorted(results, key=lambda x: x['return'], reverse=True)
 
-    # 创建输出目录
-    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
-    os.makedirs(output_dir, exist_ok=True)
 
-    # 生成按日期命名的txt文件（包含股票池标识）
-    txt_filename = os.path.join(output_dir, f"{pool_id}_screen_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
+    # 创建策略元数据
+    metadata = StrategyMetadata(
+        strategy_name=f"{pool_info['name']}成分股筛选",
+        strategy_type=f"{pool_id}_screen",
+        screen_date=datetime.now(),
+        generated_at=datetime.now(),
+        scan_count=len(symbols),
+        match_count=len(sorted_results),
+        strategy_params={
+            'pool_id': pool_id,
+            'pool_name': pool_info['name'],
+            'backtest_days': args.days,
+            'min_conditions': 2,
+            'start_date': start_date,
+            'end_date': end_date,
+            'failed_count': failed_count
+        },
+        filter_conditions="至少满足2个买入条件",
+        scan_scope=f"{pool_info['name']}成分股"
+    )
 
-    # 准备输出内容
-    output_lines = []
-    output_lines.append("=" * 80)
-    output_lines.append(f"{pool_info['name']}成分股筛选结果")
-    output_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    output_lines.append(f"回测区间: {start_date} ~ {end_date}")
-    output_lines.append(f"筛选条件: 至少满足2个买入条件")
-    output_lines.append(f"扫描数量: {len(symbols)} 只")
-    output_lines.append(f"符合数量: {len(sorted_results)} 只")
-    output_lines.append(f"失败数量: {failed_count} 只")
-    output_lines.append("=" * 80)
-    output_lines.append("")
+    # 创建输出管理器
+    output_mgr = StrategyOutputManager(metadata)
 
-    if sorted_results:
-        output_lines.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
-        output_lines.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
-        output_lines.append("-" * 100)
+    # 添加股票数据
+    for item in sorted_results:
+        # 提取6位代码（去掉.SZ/.SH后缀）
+        stock_code = item['symbol'].split('.')[0] if '.' in item['symbol'] else item['symbol']
 
-        for item in sorted_results:
-            line = f"{item['name'][:18]:<20}{item['symbol']:<15}{item['date']:<12}" \
-                   f"{item['latest_price']:>6.2f}{item['return']:>8.2%}  {item['criteria']}"
-            output_lines.append(line)
-    else:
-        output_lines.append("=== 当前无符合条件的股票 ===")
+        stock = StockData(
+            stock_code=stock_code,
+            stock_name=item['name'],
+            screen_price=item['latest_price'],
+            score=item['return'] * 100,  # 转换为百分比
+            reason=item['criteria'],
+            extra_fields={
+                'latest_date': item['date'],
+                'cum_return': item['return']
+            }
+        )
+        output_mgr.add_stock(stock)
 
-    output_lines.append("")
-    output_lines.append("=" * 80)
-    output_lines.append("买入条件说明:")
-    output_lines.append("  1. 均线金叉   - MA5 > MA20")
-    output_lines.append("  2. MACD金叉  - MACD > Signal")
-    output_lines.append("  3. RSI超卖   - RSI < 30")
-    output_lines.append("  4. BOLL下轨  - 收盘价 < BOLL下轨")
-    output_lines.append("  5. 放量20%   - 成交量较3日均量放大20%")
-    output_lines.append("=" * 80)
+    # 自定义表格格式化函数（保持原有格式）
+    def format_stockpre_table(stocks):
+        rows = []
+        if stocks:
+            rows.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
+            rows.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
+            rows.append("-" * 100)
 
-    # 写入txt文件
-    with open(txt_filename, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
+            for s in stocks:
+                # 从 extra_fields 获取数据
+                latest_date = s.extra_fields.get('latest_date', 'N/A')
+                cum_return = s.extra_fields.get('cum_return', 0)
 
-    # 同时输出到控制台
-    print('\n'.join(output_lines))
-    print(f"\n结果已保存至: {txt_filename}")
+                line = f"{s.stock_name[:18]:<20}{s.stock_code:<15}{latest_date:<12}" \
+                       f"{s.screen_price:>6.2f}{cum_return:>8.2%}  {s.reason}"
+                rows.append(line)
+        else:
+            rows.append("=== 当前无符合条件的股票 ===")
+        return rows
+
+    # 同时输出所有格式
+    try:
+        repo = get_repository()
+        results = output_mgr.output_all(repo=repo, table_formatter=format_stockpre_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        print(f"✓ 数据库记录ID: {results['screening_id']}")
+    except Exception as e:
+        # 如果数据库操作失败，至少输出文件
+        print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+        results = output_mgr.output_all(table_formatter=format_stockpre_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+
+    # 输出到控制台（原有格式）
+    print('\n')
+    print('\n'.join(output_mgr._generate_txt_content(format_stockpre_table)))
+    print("")
+    print("=" * 80)
+    print("买入条件说明:")
+    print("  1. 均线金叉   - MA5 > MA20")
+    print("  2. MACD金叉  - MACD > Signal")
+    print("  3. RSI超卖   - RSI < 30")
+    print("  4. BOLL下轨  - 收盘价 < BOLL下轨")
+    print("  5. 放量20%   - 成交量较3日均量放大20%")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

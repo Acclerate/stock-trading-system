@@ -2,3 +2,15 @@ pandas>=2.2.0
 akshare>=1.18.22
 pandas-ta==0.4.71b0
 numpy>=2.2.6
+
+# 策略跟踪系统依赖
+# SQLAlchemy (ORM框架, 支持 SQLite/MySQL/PostgreSQL)
+sqlalchemy>=2.0.0
+# python-dotenv (环境变量管理)
+python-dotenv>=1.0.0
+
+# 可选依赖 (如需使用 MySQL, 请取消注释)
+# pymysql>=1.0.0
+
+# 可选依赖 (如需使用 PostgreSQL, 请取消注释)
+# psycopg2-binary>=2.9.0

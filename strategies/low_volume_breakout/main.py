@@ -24,6 +24,8 @@ sys.path.insert(0, project_root)
 from data.data_resilient import DataResilient
 from data.cache_manager import CacheManager
 from data.diggold_data import DiggoldDataSource
+from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+from strategy_tracker.db.repository import get_repository
 
 # 处理相对导入和绝对导入
 try:
@@ -256,13 +258,51 @@ class LowVolumeBreakoutStrategy:
 
     def format_output(self, results: List[SignalResult]) -> str:
         """
-        格式化输出结果
+        格式化输出结果（保持向后兼容）
 
         Args:
             results: 信号结果列表
 
         Returns:
             格式化的输出字符串
+        """
+        # 使用新的输出管理器生成内容
+        output_data = self._prepare_output_data(results)
+        return self._format_output_text(output_data)
+
+    def _prepare_output_data(self, results: List[SignalResult]) -> dict:
+        """
+        准备输出数据
+
+        Args:
+            results: 信号结果列表
+
+        Returns:
+            包含所有输出数据的字典
+        """
+        # 统计结果
+        buy_signals = [r for r in results if r.signal_type == SignalType.BUY]
+        wait_signals = [r for r in results if r.signal_type == SignalType.WAIT]
+
+        # Top N 结果
+        top_results = buy_signals[:self.config.top_n] if buy_signals else results[:self.config.top_n]
+
+        return {
+            'buy_signals': buy_signals,
+            'wait_signals': wait_signals,
+            'top_results': top_results,
+            'total': len(results)
+        }
+
+    def _format_output_text(self, data: dict) -> str:
+        """
+        格式化文本输出
+
+        Args:
+            data: 输出数据字典
+
+        Returns:
+            格式化的文本字符串
         """
         lines = []
         lines.append("=" * 100)
@@ -278,18 +318,14 @@ class LowVolumeBreakoutStrategy:
         lines.append("")
 
         # 统计结果
-        buy_signals = [r for r in results if r.signal_type == SignalType.BUY]
-        wait_signals = [r for r in results if r.signal_type == SignalType.WAIT]
-
         lines.append("【筛选统计】")
-        lines.append(f"  分析总数: {len(results)}")
-        lines.append(f"  买入信号: {len(buy_signals)}")
-        lines.append(f"  观望: {len(wait_signals)}")
+        lines.append(f"  分析总数: {data['total']}")
+        lines.append(f"  买入信号: {len(data['buy_signals'])}")
+        lines.append(f"  观望: {len(data['wait_signals'])}")
         lines.append("")
 
         # Top N 结果
-        top_results = buy_signals[:self.config.top_n] if buy_signals else results[:self.config.top_n]
-
+        top_results = data['top_results']
         lines.append(f"【Top {len(top_results)} 结果】")
         lines.append("")
 
@@ -340,7 +376,7 @@ class LowVolumeBreakoutStrategy:
 
     def save_results(self, output: str, filename: Optional[str] = None) -> str:
         """
-        保存结果到文件
+        保存结果到文件（保持向后兼容）
 
         Args:
             output: 输出内容
@@ -364,6 +400,107 @@ class LowVolumeBreakoutStrategy:
             f.write(output)
 
         return str(filepath)
+
+    def save_results_multi_format(self, results: List[SignalResult]) -> dict:
+        """
+        保存结果到多种格式（TXT、CSV、SQLite）
+
+        Args:
+            results: 信号结果列表
+
+        Returns:
+            包含各输出路径的字典
+        """
+        # 准备输出数据
+        output_data = self._prepare_output_data(results)
+
+        # 创建策略元数据
+        metadata = StrategyMetadata(
+            strategy_name="低位放量突破策略",
+            strategy_type="low_volume_breakout",
+            screen_date=datetime.now(),
+            generated_at=datetime.now(),
+            scan_count=output_data['total'],
+            match_count=len(output_data['buy_signals']),
+            strategy_params=self.config.get_display_params(),
+            filter_conditions="低位震荡后放量突破",
+            scan_scope="中小盘股票池"
+        )
+
+        # 创建输出管理器
+        output_mgr = StrategyOutputManager(metadata, outputs_dir=Path(self.config.output_dir))
+
+        # 转换 SignalResult 到 StockData
+        for result in output_data['buy_signals']:
+            # 提取6位代码
+            stock_code = result.symbol.replace('SHSE.', '').replace('SZSE.', '')
+            stock_name = self._get_stock_name(result.symbol)
+
+            stock = StockData(
+                stock_code=stock_code,
+                stock_name=stock_name,
+                screen_price=result.indicators.get('close', 0),
+                score=result.score,
+                reason=' + '.join(result.reasons),
+                extra_fields={
+                    'market_cap': result.market_cap,
+                    'price_position': result.indicators.get('price_position', 0),
+                    'volume_expansion': result.indicators.get('volume_expansion', 0),
+                    'trend_strength': result.indicators.get('trend_strength', 0),
+                    'signal_type': result.signal_type.value
+                }
+            )
+            output_mgr.add_stock(stock)
+
+        # 自定义表格格式化函数
+        def format_lvb_table(stocks):
+            rows = []
+            if stocks:
+                top_results = stocks[:self.config.top_n]
+                rows.append(f"【Top {len(top_results)} 结果】")
+                rows.append("")
+                header = f"{'排名':<6}{'代码':<15}{'名称':<12}{'市值':<10}{'价格':<10}{'价位%':<10}{'放量':<10}{'趋势':<10}{'得分':<8}{'判定依据'}"
+                rows.append(header)
+                rows.append("-" * 110)
+
+                for idx, s in enumerate(top_results, 1):
+                    extra = s.extra_fields
+                    line = f"{idx:<6}{s.stock_code:<15}{s.stock_name:<12}"
+                    if extra.get('market_cap'):
+                        line += f"{extra['market_cap']:<10.1f}"
+                    else:
+                        line += f"{'N/A':<10}"
+                    line += f"{s.screen_price:<10.2f}"
+                    line += f"{extra.get('price_position', 0):<10.1%}"
+                    line += f"{extra.get('volume_expansion', 0):<10.2f}"
+                    line += f"{extra.get('trend_strength', 0):<10.1%}"
+                    line += f"{s.score:<8.1f}"
+                    line += f"{s.reason}"
+                    rows.append(line)
+            else:
+                rows.append("=== 当前无符合条件的股票 ===")
+            return rows
+
+        # 同时输出所有格式
+        try:
+            repo = get_repository()
+            results = output_mgr.output_all(repo=repo, table_formatter=format_lvb_table)
+            return {
+                'txt': str(results['txt']),
+                'csv': str(results['csv']),
+                'screening_id': results.get('screening_id'),
+                'success': True
+            }
+        except Exception as e:
+            # 如果数据库操作失败，至少输出文件
+            print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+            results = output_mgr.output_all(table_formatter=format_lvb_table)
+            return {
+                'txt': str(results['txt']),
+                'csv': str(results['csv']),
+                'success': True,
+                'error': str(e)
+            }
 
     def run(self, end_date: Optional[str] = None) -> List[SignalResult]:
         """
@@ -409,14 +546,19 @@ class LowVolumeBreakoutStrategy:
 
         # 步骤3: 格式化输出
         print(f"\n【步骤3】生成报告")
-        output = self.format_output(results)
+
+        # 保存到多种格式
+        output_results = self.save_results_multi_format(results)
 
         # 打印到控制台
-        print("\n" + output)
+        output_text = self.format_output(results)
+        print("\n" + output_text)
 
-        # 步骤4: 保存到文件
-        filepath = self.save_results(output)
-        print(f"\n报告已保存至: {filepath}")
+        # 打印输出路径
+        print(f"\n✓ TXT: {output_results['txt']}")
+        print(f"✓ CSV: {output_results['csv']}")
+        if output_results.get('screening_id'):
+            print(f"✓ 数据库记录ID: {output_results['screening_id']}")
 
         print("\n策略执行完成！")
 

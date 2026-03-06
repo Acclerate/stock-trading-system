@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 快速选股分析 - 使用缓存数据
+支持统一输出：TXT、CSV、SQLite
 """
 import pickle
 import pandas as pd
@@ -14,6 +15,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.data_resilient import DataResilient
+from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+from strategy_tracker.db.repository import get_repository
 
 def calculate_indicators(df):
     """计算技术指标"""
@@ -104,8 +107,10 @@ def main():
             continue
 
     results = []
+    total_analyzed = 0
 
     for symbol, files in stock_files.items():
+        total_analyzed += 1
         # 按结束日期排序，取最新的
         files.sort(key=lambda x: x[2], reverse=True)
         latest_file, start_date, end_date = files[0]
@@ -162,6 +167,87 @@ def main():
     print("  3. 投资有风险，入市需谨慎")
     print("  4. 建议设置止损位（单笔亏损不超过10%）")
     print("=" * 70)
+
+    # ========== 使用统一输出工具保存结果 ==========
+    print("\n正在保存结果...")
+
+    # 创建策略元数据
+    metadata = StrategyMetadata(
+        strategy_name="快速选股分析（基于缓存）",
+        strategy_type="quick_select",
+        screen_date=datetime.now(),
+        generated_at=datetime.now(),
+        scan_count=total_analyzed,
+        match_count=len(results),
+        strategy_params={
+            'data_source': 'cache',
+            'min_conditions': 2
+        },
+        filter_conditions="5个条件中至少满足2个",
+        scan_scope="缓存中的所有股票"
+    )
+
+    # 创建输出管理器
+    output_mgr = StrategyOutputManager(metadata)
+
+    # 添加股票数据
+    for r in results:
+        conditions_str = ' + '.join(r['conditions'])
+
+        stock = StockData(
+            stock_code=r['symbol'],
+            stock_name=r['name'],
+            screen_price=r['price'],
+            score=r['satisfied_count'],
+            reason=conditions_str,
+            extra_fields={
+                'rsi': r['rsi'],
+                'ma5': r['ma5'],
+                'ma20': r['ma20'],
+                'macd': r['macd'],
+                'satisfied_count': r['satisfied_count'],
+                'conditions': conditions_str
+            }
+        )
+        output_mgr.add_stock(stock)
+
+    # 自定义表格格式化函数
+    def format_quick_select_table(stocks):
+        rows = []
+        if stocks:
+            rows.append("=== 快速选股结果（按满足条件数量降序）===")
+            rows.append(f"{'代码':<8}{'名称':<10}{'价格':<10}{'RSI':<8}{'MA5':<10}{'MA20':<10}{'满足条件数':<12}{'买入条件'}")
+            rows.append("-" * 100)
+
+            for s in stocks:
+                extra = s.extra_fields
+                rows.append(
+                    f"{s.stock_code:<8}"
+                    f"{s.stock_name:<10}"
+                    f"{s.screen_price:>8.2f}  "
+                    f"{extra.get('rsi', 0):>6.1f}  "
+                    f"{extra.get('ma5', 0):>8.2f}  "
+                    f"{extra.get('ma20', 0):>8.2f}  "
+                    f"{extra.get('satisfied_count', 0)}/5      "
+                    f"{s.reason}"
+                )
+        else:
+            rows.append("=== 当前无符合条件的股票 ===")
+        return rows
+
+    # 同时输出所有格式
+    try:
+        repo = get_repository()
+        results = output_mgr.output_all(repo=repo, table_formatter=format_quick_select_table)
+        print(f"✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        print(f"✓ 数据库记录ID: {results['screening_id']}")
+    except Exception as e:
+        # 如果数据库操作失败，至少输出文件
+        print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+        results = output_mgr.output_all(table_formatter=format_quick_select_table)
+        print(f"✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
 
 if __name__ == "__main__":
     main()

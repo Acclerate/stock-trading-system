@@ -4,6 +4,10 @@ import akshare as ak
 import numpy as np
 from datetime import datetime, timedelta
 import os
+import sys
+
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def fetch_stock_data(symbol, start_date, end_date):
@@ -110,72 +114,102 @@ def get_hs300_symbols():
 
 def save_results_to_txt(results, total_symbols, success_count, failed_count,
                         failed_symbols, total_time, start_date, end_date):
-    """保存结果到txt文件"""
+    """使用统一输出工具保存结果（TXT、CSV、SQLite）"""
     if not results:
         print("没有结果需要保存")
         return None
 
+    # ========== 使用统一输出工具 ==========
+    from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+    from strategy_tracker.db.repository import get_repository
+
     sorted_results = sorted(results, key=lambda x: x['return'], reverse=True)
-
-    # 创建输出目录
-    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 生成按日期命名的txt文件（保留程序名称）
-    txt_filename = os.path.join(output_dir, f"stockPre_lite_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt")
-
     success_rate = (success_count / total_symbols * 100) if total_symbols > 0 else 0
 
-    # 准备输出内容
-    output_lines = []
-    output_lines.append("=" * 80)
-    output_lines.append(f"沪深300成分股筛选结果 (StockPre Lite版)")
-    output_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    output_lines.append(f"回测区间: {start_date.strftime('%Y%m%d')} ~ {end_date.strftime('%Y%m%d')}")
-    output_lines.append(f"筛选条件: 至少满足2个买入条件")
-    output_lines.append(f"符合数量: {len(sorted_results)} 只")
-    output_lines.append("")
-    output_lines.append("=== 统计报告 ===")
-    output_lines.append(f"总股票数: {total_symbols}")
-    output_lines.append(f"成功获取: {success_count} ({success_rate:.1f}%)")
-    output_lines.append(f"失败获取: {failed_count}")
-    output_lines.append(f"总用时: {total_time:.1f}秒")
-    output_lines.append(f"平均速度: {total_symbols/total_time:.2f} 只/秒")
-    output_lines.append("=" * 80)
-    output_lines.append("")
+    # 创建策略元数据
+    metadata = StrategyMetadata(
+        strategy_name="沪深300成分股筛选 (StockPre Lite版)",
+        strategy_type="hs300_lite_screen",
+        screen_date=datetime.now(),
+        generated_at=datetime.now(),
+        scan_count=total_symbols,
+        match_count=len(sorted_results),
+        strategy_params={
+            'backtest_days': 365,
+            'min_conditions': 2,
+            'success_rate': success_rate,
+            'failed_count': failed_count,
+            'total_time': total_time
+        },
+        filter_conditions="至少满足2个买入条件",
+        scan_scope="沪深300成分股"
+    )
 
-    output_lines.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
-    output_lines.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
-    output_lines.append("-" * 100)
+    # 创建输出管理器
+    output_mgr = StrategyOutputManager(metadata)
 
+    # 添加股票数据
     for item in sorted_results:
-        line = f"{item['name'][:18]:<20}{item['symbol']:<15}{item['date']:<12}" \
-               f"{item['latest_price']:>6.2f}{item['return']:>8.2%}  {item['criteria']}"
-        output_lines.append(line)
+        # 提取6位代码
+        stock_code = item['symbol'].split('.')[0] if '.' in item['symbol'] else item['symbol']
 
-    output_lines.append("")
-    output_lines.append("=" * 80)
-    output_lines.append("买入条件说明:")
-    output_lines.append("  1. 均线金叉   - MA5 > MA20")
-    output_lines.append("  2. MACD金叉  - MACD > Signal")
-    output_lines.append("  3. RSI超卖   - RSI < 30")
-    output_lines.append("  4. BOLL下轨  - 收盘价 < BOLL下轨")
-    output_lines.append("  5. 放量20%   - 成交量较3日均量放大20%")
-    output_lines.append("=" * 80)
+        stock = StockData(
+            stock_code=stock_code,
+            stock_name=item['name'],
+            screen_price=item['latest_price'],
+            score=item['return'] * 100,  # 转换为百分比
+            reason=item['criteria'],
+            extra_fields={
+                'latest_date': item['date'],
+                'cum_return': item['return']
+            }
+        )
+        output_mgr.add_stock(stock)
 
-    if failed_symbols:
-        output_lines.append("")
-        output_lines.append(f"失败股票列表（共{len(failed_symbols)}只）:")
-        for symbol in failed_symbols[:20]:
-            output_lines.append(f"  - {symbol}")
-        if len(failed_symbols) > 20:
-            output_lines.append(f"  ... 还有 {len(failed_symbols) - 20} 只")
+    # 自定义表格格式化函数（保持原有格式）
+    def format_lite_table(stocks):
+        rows = []
+        if stocks:
+            rows.append("=== 买入信号股票推荐 (按累计收益率降序) ===")
+            rows.append(f"{'名称':<20}{'代码':<15}{'最新日期':<12}{'股价':<8}{'收益率':<10}{'判定依据'}")
+            rows.append("-" * 100)
 
-    # 写入txt文件
-    with open(txt_filename, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
+            for s in stocks:
+                latest_date = s.extra_fields.get('latest_date', 'N/A')
+                cum_return = s.extra_fields.get('cum_return', 0)
 
-    return txt_filename
+                line = f"{s.stock_name[:18]:<20}{s.stock_code:<15}{latest_date:<12}" \
+                       f"{s.screen_price:>6.2f}{cum_return:>8.2%}  {s.reason}"
+                rows.append(line)
+        else:
+            rows.append("=== 当前无符合条件的股票 ===")
+
+        # 添加失败股票列表
+        if failed_symbols:
+            rows.append("")
+            rows.append(f"失败股票列表（共{len(failed_symbols)}只）:")
+            for symbol in failed_symbols[:20]:
+                rows.append(f"  - {symbol}")
+            if len(failed_symbols) > 20:
+                rows.append(f"  ... 还有 {len(failed_symbols) - 20} 只")
+
+        return rows
+
+    # 同时输出所有格式
+    try:
+        repo = get_repository()
+        results = output_mgr.output_all(repo=repo, table_formatter=format_lite_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        print(f"✓ 数据库记录ID: {results['screening_id']}")
+        return str(results['txt'])
+    except Exception as e:
+        # 如果数据库操作失败，至少输出文件
+        print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+        results = output_mgr.output_all(table_formatter=format_lite_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        return str(results['txt'])
 
 
 if __name__ == "__main__":

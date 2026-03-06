@@ -1,4 +1,4 @@
 """工具模块"""
-from .ta_helper import TAHelper
+from . import ta_helper
 
-__all__ = ['TAHelper']
+__all__ = ['ta_helper']

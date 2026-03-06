@@ -39,6 +39,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from data.data_resilient import DataResilient
 from data.cache_manager import CacheManager
+from utils.strategy_output import StrategyOutputManager, StrategyMetadata, StockData
+from strategy_tracker.db.repository import get_repository
 from gm.api import *
 
 # 加载.env文件
@@ -473,96 +475,133 @@ def backtest_strategy(stock_list, end_date=None):
 # ========== 报告生成模块 ==========
 def generate_report(screening_results, backtest_df=None):
     """
-    生成策略报告
+    使用统一输出工具生成策略报告
 
     参数:
         screening_results: 筛选结果列表
         backtest_df: 回测结果 DataFrame
+
+    返回:
+        生成的文件路径字典
     """
-    # 创建输出目录
-    output_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "outputs"
-    )
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 生成文件名
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    txt_filename = os.path.join(output_dir, f"volume_breakout_{timestamp}.txt")
-
-    # 准备输出内容
-    output_lines = []
-    output_lines.append("="*80)
-    output_lines.append("低位放量突破策略 - 筛选结果报告")
-    output_lines.append(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    output_lines.append("="*80)
-    output_lines.append("")
-
-    # 策略说明
-    output_lines.append("【策略参数】")
-    output_lines.append(f"  市值范围: {StrategyConfig.MIN_MARKET_CAP}亿 ~ {StrategyConfig.MAX_MARKET_CAP}亿")
-    output_lines.append(f"  低位阈值: 价格/250日高点 < {StrategyConfig.PRICE_POSITION_THRESHOLD:.0%}")
-    output_lines.append(f"  放量条件: 5日均量 > 20日均量 * {StrategyConfig.VOLUME_EXPANSION_RATIO}")
-    output_lines.append(f"  持有天数: {StrategyConfig.HOLDING_DAYS}天")
-    output_lines.append(f"  止盈/止损: {StrategyConfig.TAKE_PROFIT_PCT:.0%} / {StrategyConfig.STOP_LOSS_PCT:.0%}")
-    output_lines.append("")
-
-    # 筛选结果
-    output_lines.append("【筛选结果】")
+    # ========== 使用统一输出工具 ==========
     top_results = screening_results[:StrategyConfig.TOP_N_STOCKS]
 
-    if top_results:
-        output_lines.append(f"{'排名':<6}{'代码':<15}{'得分':<8}{'价格':<10}{'放量倍数':<10}{'价格位置':<12}{'趋势':<10}{'判定依据'}")
-        output_lines.append("-"*100)
+    # 创建策略元数据
+    metadata = StrategyMetadata(
+        strategy_name="低位放量突破策略",
+        strategy_type="volume_breakout",
+        screen_date=datetime.now(),
+        generated_at=datetime.now(),
+        scan_count=len(screening_results),
+        match_count=len(top_results),
+        strategy_params={
+            'min_market_cap': StrategyConfig.MIN_MARKET_CAP,
+            'max_market_cap': StrategyConfig.MAX_MARKET_CAP,
+            'price_threshold': StrategyConfig.PRICE_POSITION_THRESHOLD,
+            'volume_expansion': StrategyConfig.VOLUME_EXPANSION_RATIO,
+            'holding_days': StrategyConfig.HOLDING_DAYS,
+            'take_profit': StrategyConfig.TAKE_PROFIT_PCT,
+            'stop_loss': StrategyConfig.STOP_LOSS_PCT
+        },
+        filter_conditions=f"市值{StrategyConfig.MIN_MARKET_CAP}-{StrategyConfig.MAX_MARKET_CAP}亿 + 低位放量",
+        scan_scope="全A股（剔除ST、停牌、次新股）"
+    )
 
-        for idx, stock in enumerate(top_results, 1):
-            line = f"{idx:<6}{stock['symbol']:<15}{stock['score']:<8.1f}{stock['price']:<10.2f}"
-            line += f"{stock['volume_expansion']:<10.2f}{stock['price_position']:<12.2%}{stock['trend_factor']:<10.2%}"
-            line += f"{stock['reason']}"
-            output_lines.append(line)
-    else:
-        output_lines.append("当前无符合条件的股票")
+    # 创建输出管理器
+    output_mgr = StrategyOutputManager(metadata)
 
-    output_lines.append("")
-    output_lines.append("="*80)
+    # 添加股票数据
+    for stock in top_results:
+        # 提取6位代码
+        stock_code = stock['symbol'].replace('SHSE.', '').replace('SZSE.', '')
 
-    # 回测结果
-    if backtest_df is not None and not backtest_df.empty:
-        output_lines.append("")
-        output_lines.append("【回测结果】")
+        output_mgr.add_stock(StockData(
+            stock_code=stock_code,
+            stock_name="",  # 这个策略没有获取股票名称
+            screen_price=stock['price'],
+            score=stock['score'],
+            reason=stock['reason'],
+            extra_fields={
+                'volume_expansion': stock['volume_expansion'],
+                'price_position': stock['price_position'],
+                'trend_factor': stock['trend_factor'],
+                'symbol_full': stock['symbol']
+            }
+        ))
 
-        total_trades = len(backtest_df)
-        win_trades = len(backtest_df[backtest_df['total_return'] > 0])
-        win_rate = win_trades / total_trades if total_trades > 0 else 0
+    # 自定义表格格式化函数（保持原有格式）
+    def format_volume_breakout_table(stocks):
+        rows = []
 
-        output_lines.append(f"总交易次数: {total_trades}")
-        output_lines.append(f"胜率: {win_rate:.2%}")
-        output_lines.append(f"平均收益率: {backtest_df['total_return'].mean():.2%}")
-        output_lines.append(f"最大回撤: {backtest_df['max_drawdown'].min():.2%}")
+        # 策略参数
+        rows.append("【策略参数】")
+        rows.append(f"  市值范围: {StrategyConfig.MIN_MARKET_CAP}亿 ~ {StrategyConfig.MAX_MARKET_CAP}亿")
+        rows.append(f"  低位阈值: 价格/250日高点 < {StrategyConfig.PRICE_POSITION_THRESHOLD:.0%}")
+        rows.append(f"  放量条件: 5日均量 > 20日均量 * {StrategyConfig.VOLUME_EXPANSION_RATIO}")
+        rows.append(f"  持有天数: {StrategyConfig.HOLDING_DAYS}天")
+        rows.append(f"  止盈/止损: {StrategyConfig.TAKE_PROFIT_PCT:.0%} / {StrategyConfig.STOP_LOSS_PCT:.0%}")
+        rows.append("")
 
-        # 详细回测记录（Top 10）
-        output_lines.append("")
-        output_lines.append("【详细回测记录（Top 10）】")
-        output_lines.append(f"{'代码':<15}{'买入价':<10}{'卖出价':<10}{'收益率':<10}{'天数':<8}{'退出原因'}")
-        output_lines.append("-"*80)
+        # 筛选结果
+        rows.append("【筛选结果】")
 
-        for _, row in backtest_df.head(10).iterrows():
-            line = f"{row['symbol']:<15}{row['buy_price']:<10.2f}{row['final_price']:<10.2f}"
-            line += f"{row['total_return']:<10.2%}{row['exit_days']:<8}{row['exit_reason']}"
-            output_lines.append(line)
+        if stocks:
+            rows.append(f"{'排名':<6}{'代码':<15}{'得分':<8}{'价格':<10}{'放量倍数':<10}{'价格位置':<12}{'趋势':<10}{'判定依据'}")
+            rows.append("-"*100)
 
-    output_lines.append("")
-    output_lines.append("="*80)
+            for idx, s in enumerate(stocks, 1):
+                extra = s.extra_fields
+                line = f"{idx:<6}{extra.get('symbol_full', s.stock_code):<15}{s.score:<8.1f}{s.screen_price:<10.2f}"
+                line += f"{extra.get('volume_expansion', 0):<10.2f}{extra.get('price_position', 0):<12.2%}{extra.get('trend_factor', 0):<10.2%}"
+                line += f"{s.reason}"
+                rows.append(line)
+        else:
+            rows.append("当前无符合条件的股票")
 
-    # 写入文件
-    with open(txt_filename, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
+        # 回测结果
+        if backtest_df is not None and not backtest_df.empty:
+            rows.append("")
+            rows.append("")
+            rows.append("【回测结果】")
 
-    # 同时输出到控制台
-    print('\n'.join(output_lines))
-    print(f"\n报告已保存至: {txt_filename}")
+            total_trades = len(backtest_df)
+            win_trades = len(backtest_df[backtest_df['total_return'] > 0])
+            win_rate = win_trades / total_trades if total_trades > 0 else 0
 
-    return txt_filename
+            rows.append(f"总交易次数: {total_trades}")
+            rows.append(f"胜率: {win_rate:.2%}")
+            rows.append(f"平均收益率: {backtest_df['total_return'].mean():.2%}")
+            rows.append(f"最大回撤: {backtest_df['max_drawdown'].min():.2%}")
+
+            # 详细回测记录（Top 10）
+            rows.append("")
+            rows.append("【详细回测记录（Top 10）】")
+            rows.append(f"{'代码':<15}{'买入价':<10}{'卖出价':<10}{'收益率':<10}{'天数':<8}{'退出原因'}")
+            rows.append("-"*80)
+
+            for _, row in backtest_df.head(10).iterrows():
+                line = f"{row['symbol']:<15}{row['buy_price']:<10.2f}{row['final_price']:<10.2f}"
+                line += f"{row['total_return']:<10.2%}{row['exit_days']:<8}{row['exit_reason']}"
+                rows.append(line)
+
+        return rows
+
+    # 同时输出所有格式
+    try:
+        repo = get_repository()
+        results = output_mgr.output_all(repo=repo, table_formatter=format_volume_breakout_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        print(f"✓ 数据库记录ID: {results['screening_id']}")
+        return results
+    except Exception as e:
+        # 如果数据库操作失败，至少输出文件
+        print(f"注意: 数据库写入失败 ({e})，仅输出文件")
+        results = output_mgr.output_all(table_formatter=format_volume_breakout_table)
+        print(f"\n✓ TXT: {results['txt']}")
+        print(f"✓ CSV: {results['csv']}")
+        return results
 
 
 # ========== 主程序 ==========
