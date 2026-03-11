@@ -7,6 +7,14 @@ import sys
 import os
 import argparse
 
+# Windows控制台编码处理
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except:
+        pass
+
 # 添加项目根目录到Python路径，以便导入data模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

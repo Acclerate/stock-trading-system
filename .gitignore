@@ -6,6 +6,7 @@ __pycache__/
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -55,3 +56,5 @@ data/stock_tracker.db
 data/stock_tracker.db-*
 data/backups/
 strategy_tracker/reports/
+logs/*.log
+*.log

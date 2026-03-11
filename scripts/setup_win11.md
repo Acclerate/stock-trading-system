@@ -52,7 +52,7 @@
 
    - 选择: "启动程序"
    - 点击 "下一步"
-   - 程序或脚本: `D:\privategit\github\stockScience\.venv\Scripts\python.exe`
+   - 程序或脚本: `D:\ProgramData\anaconda3\python.exe`
    - 添加参数: `D:\privategit\github\stockScience\scripts\run_daily_screens.py`
    - 起始于: `D:\privategit\github\stockScience`
    - 点击 "下一步"
@@ -113,10 +113,16 @@ Get-Content logs\daily_screen_*.log -Tail 50 -Wait
 set "PYTHON_EXE=D:\你的Python路径\python.exe"
 ```
 
-或使用虚拟环境：
+或使用 conda base 环境（当前配置）：
+```batch
+set "PYTHON_EXE=D:\ProgramData\anaconda3\python.exe"
+```
+
+或使用虚拟环境（不推荐，缺少 gm 模块）：
 ```batch
 set "PYTHON_EXE=D:\privategit\github\stockScience\.venv\Scripts\python.exe"
 ```
+> ⚠️ 注意：本项目统一使用 conda base 环境，.venv 未安装掘金SDK（gm模块）
 
 ### 2. 权限不足
 

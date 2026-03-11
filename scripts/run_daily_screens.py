@@ -9,17 +9,129 @@
 4. 21:30 - 低位放量突破（机构策略）
 5. 21:45 - 快速选股（基于缓存）
 6. 22:00 - 多维评分分析（深度分析）
+
+前置条件：
+1. 必须先打开东方财富终端
+2. 点击"量化"进入掘金量化终端
+3. 确保掘金终端正常运行
 """
 import sys
 import os
 import subprocess
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
+
+# Windows控制台编码处理
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except:
+        pass
 
 # 设置项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# 加载 .env 文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
+
+# ========== 掘金终端连接检测 ==========
+def check_diggold_terminal() -> bool:
+    """
+    检测掘金量化终端是否正常运行
+
+    Returns:
+        True: 终端可用
+        False: 终端不可用或未启动
+    """
+    logger.info("=" * 60)
+    logger.info("检测掘金量化终端连接状态...")
+    logger.info("=" * 60)
+
+    try:
+        from gm.api import set_token, get_instruments
+
+        # 设置Token
+        token = os.getenv('DIGGOLD_TOKEN', '')
+        if not token:
+            logger.error("❌ DIGGOLD_TOKEN 环境变量未设置")
+            logger.error("请在 .env 文件中配置 DIGGOLD_TOKEN")
+            return False
+
+        set_token(token)
+        logger.info(f"Token已配置: {token[:16]}...")
+
+        # 尝试获取股票列表来验证连接
+        logger.info("正在连接掘金终端...")
+        try:
+            result = get_instruments(exchanges='SHSE', sec_types=1, df=True)
+            if result is not None and len(result) > 0:
+                logger.info(f"✅ 掘金终端连接成功! (获取到 {len(result)} 只股票)")
+                return True
+            else:
+                logger.warning("⚠️ 掘金终端返回空数据")
+                return False
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ 掘金终端连接失败: {error_msg}")
+
+            # 提供友好的错误提示
+            if "连接" in error_msg or "网络" in error_msg or "timeout" in error_msg.lower():
+                logger.error("")
+                logger.error("【可能的解决方案】")
+                logger.error("1. 请确保东方财富终端已打开")
+                logger.error("2. 请点击终端内的'量化'按钮进入掘金量化终端")
+                logger.error("3. 确认掘金量化终端处于正常运行状态")
+                logger.error("")
+                logger.error("或者运行: scripts\\start_with_terminal.bat")
+                logger.error("该脚本会自动打开东方财富终端并等待就绪")
+                logger.error("")
+
+            return False
+
+    except ImportError as e:
+        logger.error(f"❌ 掘金SDK未安装: {e}")
+        logger.error("请运行: pip install gm")
+        return False
+    except Exception as e:
+        logger.error(f"❌ 检测过程发生异常: {e}")
+        return False
+
+
+def wait_for_terminal_ready(max_wait_seconds: int = 60) -> bool:
+    """
+    等待掘金终端就绪（用于启动终端后检测）
+
+    Args:
+        max_wait_seconds: 最大等待时间（秒）
+
+    Returns:
+        True: 终端就绪
+        False: 超时未就绪
+    """
+    logger.info(f"等待掘金终端就绪 (最多等待 {max_wait_seconds} 秒)...")
+
+    start_time = time.time()
+    check_interval = 3  # 每3秒检测一次
+
+    while time.time() - start_time < max_wait_seconds:
+        if check_diggold_terminal():
+            return True
+
+        wait_time = int(time.time() - start_time)
+        logger.info(f"等待中... ({wait_time}/{max_wait_seconds} 秒)")
+        time.sleep(check_interval)
+
+    logger.error(f"❌ 等待超时 ({max_wait_seconds} 秒)，掘金终端仍未就绪")
+    return False
 
 # 配置日志
 LOG_DIR = PROJECT_ROOT / "logs"
@@ -59,7 +171,7 @@ STRATEGIES = [
         'name': '趋势股筛选',
         'type': 'trend_stocks',
         'script': 'strategies/trend_stocks.py',
-        'args': ['--days', '60', '--min-strength', '0.6'],
+        'args': ['--days', '60'],
         'description': '趋势股筛选（扫描全A股）',
         'schedule_time': '21:20'
     },
@@ -172,6 +284,27 @@ def main():
     logger.info(f"执行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"待执行策略数量: {len(STRATEGIES)}")
     logger.info("=" * 60)
+    logger.info("")
+
+    # ========== 前置条件检查 ==========
+    logger.info("【前置检查】")
+    if not check_diggold_terminal():
+        logger.error("")
+        logger.error("=" * 60)
+        logger.error("❌ 掘金终端连接检测失败!")
+        logger.error("=" * 60)
+        logger.error("")
+        logger.error("请确保:")
+        logger.error("  1. 东方财富终端已打开")
+        logger.error("  2. 已点击'量化'进入掘金量化终端")
+        logger.error("  3. DIGGOLD_TOKEN 已在 .env 文件中配置")
+        logger.error("")
+        logger.error("或使用启动脚本: scripts\\start_with_terminal.bat")
+        logger.error("")
+        return 1
+
+    logger.info("")
+    logger.info("✅ 前置检查通过，开始执行策略...")
     logger.info("")
 
     # 执行结果统计
