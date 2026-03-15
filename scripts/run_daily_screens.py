@@ -48,6 +48,9 @@ def check_diggold_terminal() -> bool:
     """
     检测掘金量化终端是否正常运行
 
+    使用 history() 函数测试连接，因为 get_instruments() 可能返回 1024 错误
+    而 history() 函数在实际使用中是正常的。
+
     Returns:
         True: 终端可用
         False: 终端不可用或未启动
@@ -57,7 +60,7 @@ def check_diggold_terminal() -> bool:
     logger.info("=" * 60)
 
     try:
-        from gm.api import set_token, get_instruments
+        from gm.api import set_token, history
 
         # 设置Token
         token = os.getenv('DIGGOLD_TOKEN', '')
@@ -69,16 +72,30 @@ def check_diggold_terminal() -> bool:
         set_token(token)
         logger.info(f"Token已配置: {token[:16]}...")
 
-        # 尝试获取股票列表来验证连接
+        # 使用 history() 测试连接 - 获取平安银行最近几天的数据
         logger.info("正在连接掘金终端...")
         try:
-            result = get_instruments(exchanges='SHSE', sec_types=1, df=True)
-            if result is not None and len(result) > 0:
-                logger.info(f"✅ 掘金终端连接成功! (获取到 {len(result)} 只股票)")
+            from datetime import datetime, timedelta
+
+            # 获取最近5天的数据作为测试
+            end_date = datetime.now().strftime('%Y-%m-%d')
+            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+            result = history(
+                symbol='SHSE.600000',  # 浦发银行，流动性好
+                frequency='1d',
+                start_time=start_date,
+                end_time=end_date,
+                df=True
+            )
+
+            if result is not None and not result.empty:
+                logger.info(f"✅ 掘金终端连接成功! (获取到 {len(result)} 条测试数据)")
                 return True
             else:
                 logger.warning("⚠️ 掘金终端返回空数据")
                 return False
+
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ 掘金终端连接失败: {error_msg}")
@@ -275,8 +292,12 @@ def run_strategy(strategy_config: dict) -> bool:
         return False
 
 
-def main():
-    """主函数"""
+def main(skip_terminal_check: bool = False):
+    """主函数
+
+    Args:
+        skip_terminal_check: 是否跳过掘金终端检测（使用akshare数据源）
+    """
     start_time = datetime.now()
     logger.info("")
     logger.info("=" * 60)
@@ -288,7 +309,12 @@ def main():
 
     # ========== 前置条件检查 ==========
     logger.info("【前置检查】")
-    if not check_diggold_terminal():
+
+    if skip_terminal_check:
+        logger.info("已跳过掘金终端检测 (--skip-terminal-check)")
+        logger.info("将使用akshare作为数据源")
+        logger.info("")
+    elif not check_diggold_terminal():
         logger.error("")
         logger.error("=" * 60)
         logger.error("❌ 掘金终端连接检测失败!")
@@ -299,7 +325,8 @@ def main():
         logger.error("  2. 已点击'量化'进入掘金量化终端")
         logger.error("  3. DIGGOLD_TOKEN 已在 .env 文件中配置")
         logger.error("")
-        logger.error("或使用启动脚本: scripts\\start_with_terminal.bat")
+        logger.error("如需跳过终端检测使用akshare数据源，请使用:")
+        logger.error("  python scripts/run_daily_screens.py --skip-terminal-check")
         logger.error("")
         return 1
 
@@ -352,8 +379,28 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="每日策略自动执行脚本")
+    parser.add_argument(
+        "--skip-terminal-check",
+        action="store_true",
+        default=True,  # 默认跳过检测，因为掘金终端经常不可用
+        help="跳过掘金终端检测，使用akshare数据源 (默认开启)"
+    )
+    parser.add_argument(
+        "--require-terminal",
+        action="store_true",
+        help="强制要求掘金终端运行"
+    )
+
+    args = parser.parse_args()
+
+    # 如果指定了 --require-terminal，则不跳过检测
+    skip_check = args.skip_terminal_check and not args.require_terminal
+
     try:
-        exit_code = main()
+        exit_code = main(skip_terminal_check=skip_check)
         sys.exit(exit_code)
     except KeyboardInterrupt:
         logger.warning("\n执行被用户中断")

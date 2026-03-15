@@ -165,8 +165,26 @@ def generate_signals(df):
 
 # ========== 回测模块 ==========
 def backtest_strategy(df, signals):
-    """模拟交易回测"""
-    df['position'] = signals['signal'].shift(1)  # 次日开盘执行
+    """模拟交易回测（状态机：只做多，持仓至卖出信号，无做空）
+
+    持仓状态：0 = 空仓，1 = 持仓
+    - signal == 1 且当前空仓 → 次日开仓
+    - signal == -1 且当前持仓 → 次日平仓
+    - 其余情况维持当前仓位（不反复开仓/做空）
+    """
+    raw_signals = signals['signal'].values
+    positions = np.zeros(len(raw_signals), dtype=float)
+
+    holding = 0
+    for i, sig in enumerate(raw_signals):
+        if sig == 1 and holding == 0:
+            holding = 1   # 触发买入信号，开仓
+        elif sig == -1 and holding == 1:
+            holding = 0   # 触发卖出信号，平仓
+        positions[i] = holding
+
+    # 次日执行：今天信号决定明天仓位
+    df['position'] = pd.Series(positions, index=df.index).shift(1).fillna(0)
     df['returns'] = df['close'].pct_change()
     df['strategy_returns'] = df['position'] * df['returns']
     df['cum_returns'] = (1 + df['strategy_returns']).cumprod()

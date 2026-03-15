@@ -58,3 +58,6 @@ data/backups/
 strategy_tracker/reports/
 logs/*.log
 *.log
+data/*.db
+data/id_cache.db-shm
+data/id_cache.db-wal
