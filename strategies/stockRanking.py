@@ -11,6 +11,14 @@ import threading
 import json
 from pathlib import Path
 
+# Windows控制台编码处理 - 必须在其他导入之前
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except:
+        pass
+
 # 添加项目根目录到Python路径，以便导入data模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -286,16 +294,45 @@ if __name__ == "__main__":
     
     # 预先获取宏观数据（每日仅更新一次）
     try:
-        # 使用更稳健的CPI获取方式
+        # 使用更稳健的CPI获取方式 - 修复：只调用一次，且正确判断
+        cpi_df = ak.macro_china_cpi()
+        if cpi_df.empty:
+            print("警告: ak.macro_china_cpi() 返回空数据，将使用默认值")
+            cpi_df = pd.DataFrame()
+
         DataCache.macro_data = {
-            'cpi': ak.macro_china_cpi() if not pd.DataFrame(ak.macro_china_cpi()).empty else pd.DataFrame(),
-            'fx': ak.fx_spot_quote(),
-            'pmi': ak.macro_china_pmi(),
-            'gdp': ak.macro_china_gdp()
+            'cpi': cpi_df,
+            'fx': pd.DataFrame(),  # 先使用空DataFrame，避免频繁请求失败
+            'pmi': pd.DataFrame(),
+            'gdp': pd.DataFrame()
         }
+
+        # 尝试获取其他宏观数据
+        try:
+            DataCache.macro_data['fx'] = ak.fx_spot_quote() or pd.DataFrame()
+        except:
+            pass
+        try:
+            DataCache.macro_data['pmi'] = ak.macro_china_pmi() or pd.DataFrame()
+        except:
+            pass
+        try:
+            DataCache.macro_data['gdp'] = ak.macro_china_gdp() or pd.DataFrame()
+        except:
+            pass
+
+        print(f"宏观数据获取成功 - CPI: {len(DataCache.macro_data['cpi'])}行, "
+              f"FX: {len(DataCache.macro_data['fx'])}行, "
+              f"PMI: {len(DataCache.macro_data['pmi'])}行, "
+              f"GDP: {len(DataCache.macro_data['gdp'])}行")
     except Exception as e:
-        print(f"宏观数据获取失败，使用本地缓存数据: {str(e)}")
-        DataCache.macro_data = pd.read_pickle('macro_backup.pkl')
+        print(f"宏观数据获取失败，使用默认值: {str(e)[:100]}")
+        DataCache.macro_data = {
+            'cpi': pd.DataFrame(),
+            'fx': pd.DataFrame(),
+            'pmi': pd.DataFrame(),
+            'gdp': pd.DataFrame()
+        }
 
     # 新增：处理空的CPI数据情况
     if DataCache.macro_data['cpi'].empty:
@@ -368,14 +405,14 @@ if __name__ == "__main__":
                 stocks = config.get('stocks', [])
                 symbols = [stock['code'] for stock in stocks]
                 description = config.get('description', '多维评分分析股票池')
-                print(f"✅ 从配置文件加载 {len(symbols)} 只股票: {description}")
+                print(f"[OK] 从配置文件加载 {len(symbols)} 只股票: {description}")
         except Exception as e:
-            print(f"⚠️  配置文件读取失败，使用默认股票列表: {e}")
+            print(f"[WARN] 配置文件读取失败，使用默认股票列表: {e}")
             symbols = ["600489","600938","600919","601857","600600",
                        "601088","002304","002007","600905","600048",
                        "601872","601012","002737","600009","000538"]
     else:
-        print("⚠️  配置文件不存在，使用默认股票列表")
+        print("[WARN] 配置文件不存在，使用默认股票列表")
         symbols = ["600489","600938","600919","601857","600600",
                    "601088","002304","002007","600905","600048",
                    "601872","601012","002737","600009","000538"]
@@ -404,9 +441,9 @@ if __name__ == "__main__":
             # 买卖建议
             action = "持有"
             if latest_signal == 1:
-                action = "★★★ 买入 ★★★"
+                action = "*** 买入 ***"
             elif latest_signal == -1:
-                action = "▼▼▼ 卖出 ▼▼▼"
+                action = "=== 卖出 ==="
             
             # 评分详情
             latest_score = signals.iloc[-1]

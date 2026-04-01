@@ -11,6 +11,14 @@ from datetime import datetime
 import sys
 import os
 
+# Windows控制台编码处理 - 必须在其他导入之前
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except:
+        pass
+
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -44,7 +52,7 @@ def calculate_indicators(df):
     df['boll_lower'] = df['boll_mid'] - 2 * df['boll_std']
 
     # 成交量变化
-    df['volume_pct_change'] = df['volume'].pct_change()
+    df['volume_pct_change'] = df['volume'].pct_change(fill_method=None)
 
     return df
 
@@ -239,15 +247,15 @@ def main():
     try:
         repo = get_repository()
         results = output_mgr.output_all(repo=repo, table_formatter=format_quick_select_table)
-        print(f"✓ TXT: {results['txt']}")
-        print(f"✓ CSV: {results['csv']}")
-        print(f"✓ 数据库记录ID: {results['screening_id']}")
+        print(f"[OK] TXT: {results['txt']}")
+        print(f"[OK] CSV: {results['csv']}")
+        print(f"[OK] 数据库记录ID: {results['screening_id']}")
     except Exception as e:
         # 如果数据库操作失败，至少输出文件
         print(f"注意: 数据库写入失败 ({e})，仅输出文件")
         results = output_mgr.output_all(table_formatter=format_quick_select_table)
-        print(f"✓ TXT: {results['txt']}")
-        print(f"✓ CSV: {results['csv']}")
+        print(f"[OK] TXT: {results['txt']}")
+        print(f"[OK] CSV: {results['csv']}")
 
 if __name__ == "__main__":
     main()

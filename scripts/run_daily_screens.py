@@ -65,7 +65,7 @@ def check_diggold_terminal() -> bool:
         # 设置Token
         token = os.getenv('DIGGOLD_TOKEN', '')
         if not token:
-            logger.error("❌ DIGGOLD_TOKEN 环境变量未设置")
+            logger.error("[ERROR] DIGGOLD_TOKEN 环境变量未设置")
             logger.error("请在 .env 文件中配置 DIGGOLD_TOKEN")
             return False
 
@@ -90,15 +90,15 @@ def check_diggold_terminal() -> bool:
             )
 
             if result is not None and not result.empty:
-                logger.info(f"✅ 掘金终端连接成功! (获取到 {len(result)} 条测试数据)")
+                logger.info(f"[OK] 掘金终端连接成功! (获取到 {len(result)} 条测试数据)")
                 return True
             else:
-                logger.warning("⚠️ 掘金终端返回空数据")
+                logger.warning("[WARN] 掘金终端返回空数据")
                 return False
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"❌ 掘金终端连接失败: {error_msg}")
+            logger.error(f"[ERROR] 掘金终端连接失败: {error_msg}")
 
             # 提供友好的错误提示
             if "连接" in error_msg or "网络" in error_msg or "timeout" in error_msg.lower():
@@ -115,11 +115,11 @@ def check_diggold_terminal() -> bool:
             return False
 
     except ImportError as e:
-        logger.error(f"❌ 掘金SDK未安装: {e}")
+        logger.error(f"[ERROR] 掘金SDK未安装: {e}")
         logger.error("请运行: pip install gm")
         return False
     except Exception as e:
-        logger.error(f"❌ 检测过程发生异常: {e}")
+        logger.error(f"[ERROR] 检测过程发生异常: {e}")
         return False
 
 
@@ -147,7 +147,7 @@ def wait_for_terminal_ready(max_wait_seconds: int = 60) -> bool:
         logger.info(f"等待中... ({wait_time}/{max_wait_seconds} 秒)")
         time.sleep(check_interval)
 
-    logger.error(f"❌ 等待超时 ({max_wait_seconds} 秒)，掘金终端仍未就绪")
+    logger.error(f"[ERROR] 等待超时 ({max_wait_seconds} 秒)，掘金终端仍未就绪")
     return False
 
 # 配置日志
@@ -261,6 +261,10 @@ def run_strategy(strategy_config: dict) -> bool:
         # 构建命令
         cmd = [sys.executable, str(script_path)] + args
 
+        # 设置环境变量，强制子进程使用UTF-8编码
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8:replace'
+
         # 执行命令
         result = subprocess.run(
             cmd,
@@ -268,6 +272,8 @@ def run_strategy(strategy_config: dict) -> bool:
             capture_output=True,
             text=True,
             encoding='utf-8',
+            errors='replace',  # 忽略无法解码的字符，避免UnicodeDecodeError
+            env=env,  # 传递UTF-8编码环境
             timeout=1800  # 30分钟超时
         )
 
@@ -278,17 +284,17 @@ def run_strategy(strategy_config: dict) -> bool:
             logger.warning(f"STDERR:\n{result.stderr}")
 
         if result.returncode == 0:
-            logger.info(f"✅ {name} 执行成功")
+            logger.info(f"[OK] {name} 执行成功")
             return True
         else:
-            logger.error(f"❌ {name} 执行失败 (返回码: {result.returncode})")
+            logger.error(f"[ERROR] {name} 执行失败 (返回码: {result.returncode})")
             return False
 
     except subprocess.TimeoutExpired:
-        logger.error(f"❌ {name} 执行超时 (30分钟)")
+        logger.error(f"[ERROR] {name} 执行超时 (30分钟)")
         return False
     except Exception as e:
-        logger.error(f"❌ {name} 执行异常: {e}")
+        logger.error(f"[ERROR] {name} 执行异常: {e}")
         return False
 
 
@@ -317,7 +323,7 @@ def main(skip_terminal_check: bool = False):
     elif not check_diggold_terminal():
         logger.error("")
         logger.error("=" * 60)
-        logger.error("❌ 掘金终端连接检测失败!")
+        logger.error("[ERROR] 掘金终端连接检测失败!")
         logger.error("=" * 60)
         logger.error("")
         logger.error("请确保:")
@@ -331,7 +337,7 @@ def main(skip_terminal_check: bool = False):
         return 1
 
     logger.info("")
-    logger.info("✅ 前置检查通过，开始执行策略...")
+    logger.info("[OK] 前置检查通过，开始执行策略...")
     logger.info("")
 
     # 执行结果统计

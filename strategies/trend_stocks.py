@@ -210,7 +210,7 @@ def calculate_trend_indicators(df):
     df['vol_ratio'] = df['volume'] / df['vol_ma5']
 
     # 计算成交量变化率
-    df['volume_pct_change'] = df['volume'].pct_change()
+    df['volume_pct_change'] = df['volume'].pct_change(fill_method=None)
 
     return df
 

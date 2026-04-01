@@ -26,7 +26,7 @@ import config.realtime_strength_config as cfg
 
 # 测试股票列表
 TEST_STOCKS = {
-    'SHSE.600644': '乐山电力',
+    'sz003031': '乐山电力',
     'SZSE.000818': '航锦科技',
     'SZSE.002202': '金风科技',
     'SZSE.000988': '华工科技',
