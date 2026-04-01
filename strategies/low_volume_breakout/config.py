@@ -28,22 +28,22 @@ class StrategyConfig:
         # 选股参数
         min_market_cap: 最小市值（亿元）
         max_market_cap: 最大市值（亿元）
-        low_threshold: 低位阈值（当前价格/730日最高价，机构级建议40%）
-        volume_ratio: 放量倍数（5日均量/20日均量，机构级建议2倍）
+        low_threshold: 低位阈值（当前价格/N日最高价，默认0.6=从高点跌40%）
+        volume_ratio: 放量倍数（5日均量/20日均量，默认1.3倍）
 
         # 数据参数
         data_period: 获取历史数据天数
-        min_data_points: 最小数据点数（730天，确保能计算2年指标）
+        min_data_points: 最小数据点数（250天）
 
         # 技术指标参数
         ma_short: 短期均线周期
         ma_mid: 中期均线周期
         ma_long: 长期均线周期
-        ma_trend: 趋势均线周期（MA730两年线）
+        ma_trend: 趋势均线周期（MA250半年线）
         volume_ma_short: 短期均量周期
         volume_ma_mid: 中期均量周期
         volume_ma_long: 长期均量周期
-        high_period: 730日最高价周期
+        high_period: N日最高价周期（默认250=一年）
 
         # 机构级过滤参数
         require_trend_filter: 是否启用趋势过滤（MA20 > MA60）
@@ -74,31 +74,31 @@ class StrategyConfig:
         recent_return_threshold: 近期涨幅阈值（5日涨幅超过此值警告）
     """
 
-    # ==================== 机构级选股参数 ====================
-    min_market_cap: float = 30.0  # 最小市值（亿元）- 机构级优化
-    max_market_cap: float = 300.0  # 最大市值（亿元）- 机构级优化
-    low_threshold: float = 0.4  # 低位阈值：当前价格/730日最高价 - 机构级40%
-    volume_ratio: float = 2.0  # 5日均量 > 20日均量 * N - 机构级2倍
+    # ==================== 选股参数 ====================
+    min_market_cap: float = 10.0  # 最小市值（亿元）
+    max_market_cap: float = 500.0  # 最大市值（亿元）
+    low_threshold: float = 0.6  # 低位阈值：当前价格/N日最高价（0.6=从高点跌40%）
+    volume_ratio: float = 1.3  # 5日均量 / 20日均量（1.3倍为显著放量）
 
     # 数据参数
-    data_period: int = 1000  # 获取历史数据天数（增加缓冲区，确保有足够数据）
-    min_data_points: int = 730  # 最小数据点数（用于计算730日指标）
+    data_period: int = 400  # 获取历史数据天数
+    min_data_points: int = 250  # 最小数据点数（用于计算250日指标）
 
     # 技术指标参数
     ma_short: int = 5  # MA5
     ma_mid: int = 20  # MA20
     ma_long: int = 60  # MA60
-    ma_trend: int = 730  # MA730（两年线）
+    ma_trend: int = 250  # MA250（半年线）
     volume_ma_short: int = 5  # 5日均量
     volume_ma_mid: int = 20  # 20日均量
     volume_ma_long: int = 60  # 60日均量
-    high_period: int = 730  # 730日最高价周期（两年最高价）
+    high_period: int = 250  # 250日最高价周期（一年最高价）
 
-    # ==================== 机构级过滤参数 ====================
-    require_trend_filter: bool = True  # 趋势过滤：要求MA20 > MA60（避免下跌中继）
-    min_turnover_rate: float = 0.01  # 最低换手率要求（1%）- 反映真实资金参与
-    max_volatility_20d: float = 0.30  # 20日最大振幅（30%）- 波动率压缩
-    require_volume_progressive: bool = True  # 成交量连续放大（VOL5>VOL20>VOL60）
+    # ==================== 过滤参数（分级评分制）====================
+    require_trend_filter: bool = True  # 趋势过滤：MA20 > MA60（评分权重项）
+    min_turnover_rate: float = 0  # 最低换手率要求（0=不使用，因估算不准确）
+    max_volatility_20d: float = 0.50  # 20日最大振幅（50%）- 波动率评分项
+    require_volume_progressive: bool = True  # 成交量连续放大（VOL5>VOL20>VOL60）评分项
 
     # 过滤参数
     min_listing_days: int = 365  # 剔除上市不足365天的次新股（约1年）
@@ -170,7 +170,7 @@ class StrategyConfig:
             格式化的参数字典
         """
         params = {
-            '策略版本': '[机构级]',
+            '评分机制': '[分级评分制]',
             '市值范围': f'{self.min_market_cap}亿 - {self.max_market_cap}亿',
             '低位阈值': f'{self.low_threshold:.0%}',
             '放量倍数': f'{self.volume_ratio:.1f}x',
@@ -182,6 +182,7 @@ class StrategyConfig:
             '换手率要求': f'>={self.min_turnover_rate:.1%}' if self.min_turnover_rate > 0 else '关闭',
             '波动率上限': f'<{self.max_volatility_20d:.0%}' if self.max_volatility_20d < 1 else '关闭',
             '量能递进': '[启用]' if self.require_volume_progressive else '[关闭]',
+            '买入阈值': f'{self.buy_threshold:.0f}分',
         }
         return params
 

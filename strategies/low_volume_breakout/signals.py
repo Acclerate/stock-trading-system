@@ -9,9 +9,11 @@ import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from collections import OrderedDict
 
 import pandas as pd
 import numpy as np
+from collections import defaultdict
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,144 +58,209 @@ class SignalResult:
 
 
 class SignalGenerator:
-    """信号生成器"""
+    """信号生成器（分级评分制）"""
 
     def __init__(self, config: Optional[StrategyConfig] = None):
-        """
-        初始化信号生成器
-
-        Args:
-            config: 策略配置
-        """
         self.config = config or StrategyConfig()
         self.indicator_calc = IndicatorCalculator(config)
+        # 过滤条件统计（用于诊断）
+        self._condition_stats = defaultdict(lambda: {'passed': 0, 'failed': 0})
+        self._total_evaluated = 0
 
-    def check_basic_conditions(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+    def evaluate_conditions(self, df: pd.DataFrame) -> Tuple[float, List[str], List[str]]:
         """
-        检查基本条件（必须全部满足）- 机构级版本
+        分级评分制评估所有条件
+
+        每个条件独立评分，不再硬性过滤。只有总得分决定信号类型。
+
+        评分分布（总分100）:
+        - 价格位置: 0-30分
+        - 成交量放大: 0-20分
+        - 均量趋势: 0-10分
+        - 量能递进: 0-10分
+        - 趋势过滤(MA20>MA60): 0-10分
+        - 趋势启动(close>MA60): 0-10分
+        - 波动率: 0-5分
+        - 市值偏好: 0-5分（由调用方添加）
 
         Args:
             df: 包含指标的DataFrame
 
         Returns:
-            (是否满足, 原因列表)
+            (总得分, 通过原因列表, 失败原因列表)
         """
-        if df.empty or len(df) < self.config.min_data_points:
-            return False, ["数据不足"]
+        if df.empty or len(df) < 60:
+            return 0, [], ["数据不足(需至少60天)"]
 
         latest = df.iloc[-1]
-        reasons = []
+        score = 0.0
+        passed_reasons = []
+        failed_reasons = []
+        self._total_evaluated += 1
 
-        # ==================== 机构级条件1：趋势过滤 ====================
-        if self.config.require_trend_filter:
-            ma20 = latest.get(f'ma{self.config.ma_mid}', 0)
-            ma60 = latest.get(f'ma{self.config.ma_long}', 0)
-            if ma20 <= 0 or ma60 <= 0:
-                return False, ["均线指标未计算（数据不足60天）"]
-            if ma20 <= ma60:
-                return False, [f"趋势未转强 (MA20={ma20:.2f} <= MA60={ma60:.2f})，避免下跌中继"]
-            reasons.append(f"趋势向上(MA20>MA60)")
-
-        # ==================== 机构级条件2：长期低位震荡（两年低位）====================
+        # ===== 1. 价格位置 (0-30分) =====
         price_position = latest.get('price_position', 0)
-        if price_position <= 0:
-            return False, ["指标未计算（数据不足730天）"]
-        if price_position >= self.config.low_threshold:
-            return False, [f"价格位置过高 ({price_position:.1%} >= {self.config.low_threshold:.0%})"]
-        reasons.append(f"两年低位({price_position:.1%})")
+        if price_position > 0:
+            if price_position < self.config.low_threshold:
+                # 低于阈值：得分与低位程度成正比
+                s = 30 * (1 - price_position / self.config.low_threshold)
+                score += s
+                passed_reasons.append(f"低位({price_position:.1%})")
+                self._condition_stats['price_position']['passed'] += 1
+            else:
+                # 高于阈值：部分得分（越高扣越多）
+                excess = (price_position - self.config.low_threshold) / max(0.01, 1 - self.config.low_threshold)
+                s = max(0, 10 * (1 - excess))
+                score += s
+                failed_reasons.append(f"价格偏高({price_position:.1%}>={self.config.low_threshold:.0%})")
+                self._condition_stats['price_position']['failed'] += 1
+        else:
+            failed_reasons.append("价位指标缺失")
+            self._condition_stats['price_position']['failed'] += 1
 
-        # ==================== 机构级条件3：成交量连续放大验证 ====================
-        if self.config.require_volume_progressive:
-            vol5 = latest.get(f'volume_ma{self.config.volume_ma_short}', 0)
-            vol20 = latest.get(f'volume_ma{self.config.volume_ma_mid}', 0)
-            vol60 = latest.get(f'volume_ma{self.config.volume_ma_long}', 0)
-
-            if vol5 <= 0 or vol20 <= 0 or vol60 <= 0:
-                return False, ["均量指标未计算（数据不足60天）"]
-            if vol5 <= vol20 or vol20 <= vol60:
-                return False, [f"成交量未连续放大 (VOL5={vol5:.0f} <= VOL20={vol20:.0f} 或 VOL20 <= VOL60={vol60:.0f})"]
-            reasons.append("量能递进")
-
-        # ==================== 条件4：近期逐步放量 ====================
+        # ===== 2. 成交量放大 (0-20分) =====
         volume_expansion = latest.get('volume_expansion', 0)
+        if volume_expansion > 0:
+            s = 20 * min(1.5, max(0, volume_expansion / self.config.volume_ratio))
+            score += s
+            if volume_expansion >= self.config.volume_ratio:
+                passed_reasons.append(f"放量({volume_expansion:.1f}x)")
+                self._condition_stats['volume_expansion']['passed'] += 1
+            else:
+                failed_reasons.append(f"放量不足({volume_expansion:.2f}x<{self.config.volume_ratio:.1f}x)")
+                self._condition_stats['volume_expansion']['failed'] += 1
+        else:
+            failed_reasons.append("放量指标缺失")
+            self._condition_stats['volume_expansion']['failed'] += 1
+
+        # ===== 3. 均量趋势 (0-10分) =====
         volume_trend = latest.get('volume_trend', 0)
+        if volume_trend > 0:
+            s = 10 * min(1.0, volume_trend)
+            score += s
+            if volume_trend >= 1.0:
+                passed_reasons.append("均量上升")
+                self._condition_stats['volume_trend']['passed'] += 1
+            else:
+                failed_reasons.append(f"均量下降({volume_trend:.2f})")
+                self._condition_stats['volume_trend']['failed'] += 1
+        else:
+            failed_reasons.append("均量趋势缺失")
+            self._condition_stats['volume_trend']['failed'] += 1
 
-        if volume_expansion <= 0 or volume_trend <= 0:
-            return False, ["放量指标未计算（数据不足60天）"]
+        # ===== 4. 量能递进 VOL5>VOL20>VOL60 (0-10分) =====
+        vol5 = latest.get(f'volume_ma{self.config.volume_ma_short}', 0)
+        vol20 = latest.get(f'volume_ma{self.config.volume_ma_mid}', 0)
+        vol60 = latest.get(f'volume_ma{self.config.volume_ma_long}', 0)
+        if vol5 > 0 and vol20 > 0 and vol60 > 0:
+            if vol5 > vol20 > vol60:
+                score += 10
+                passed_reasons.append("量能递进")
+                self._condition_stats['volume_progressive']['passed'] += 1
+            elif vol5 > vol20:
+                score += 5  # 部分递进给一半分
+                failed_reasons.append("量能部分递进(VOL5>VOL20但VOL20<=VOL60)")
+                self._condition_stats['volume_progressive']['failed'] += 1
+            else:
+                failed_reasons.append("量能未递进")
+                self._condition_stats['volume_progressive']['failed'] += 1
+        else:
+            self._condition_stats['volume_progressive']['failed'] += 1
 
-        if volume_expansion < self.config.volume_ratio:
-            return False, [f"放量不足 ({volume_expansion:.2f}x < {self.config.volume_ratio:.1f}x)"]
+        # ===== 5. 趋势过滤 MA20>MA60 (0-10分) =====
+        ma20 = latest.get(f'ma{self.config.ma_mid}', 0)
+        ma60 = latest.get(f'ma{self.config.ma_long}', 0)
+        if ma20 > 0 and ma60 > 0:
+            if ma20 > ma60:
+                score += 10
+                passed_reasons.append("趋势向上(MA20>MA60)")
+                self._condition_stats['trend_filter']['passed'] += 1
+            else:
+                # 接近金叉也给部分分
+                ratio = ma20 / ma60
+                s = max(0, 5 * (ratio - 0.95) / 0.05)
+                score += s
+                failed_reasons.append(f"MA20<=MA60({ma20:.2f}/{ma60:.2f})")
+                self._condition_stats['trend_filter']['failed'] += 1
+        else:
+            self._condition_stats['trend_filter']['failed'] += 1
 
-        if volume_trend < 1.0:
-            return False, [f"均量趋势向下 ({volume_trend:.2f} < 1.0)"]
-
-        reasons.append(f"放量({volume_expansion:.1f}x)")
-
-        # ==================== 机构级条件5：换手率过滤 ====================
-        if self.config.min_turnover_rate > 0:
-            # 计算当日换手率
-            if len(df) >= 1:
-                turnover_rate = self._calculate_turnover_rate(latest, df)
-                if turnover_rate < self.config.min_turnover_rate:
-                    return False, [f"换手率过低 ({turnover_rate:.2%} < {self.config.min_turnover_rate:.1%})"]
-                reasons.append(f"换手率({turnover_rate:.1%})")
-
-        # ==================== 机构级条件6：波动率压缩 ====================
-        if self.config.max_volatility_20d < 1.0:  # 启用波动率过滤
-            if len(df) >= 20:
-                volatility_20d = self._calculate_volatility_20d(df)
-                if volatility_20d > self.config.max_volatility_20d:
-                    return False, [f"波动率过高 ({volatility_20d:.1%} > {self.config.max_volatility_20d:.0%})"]
-                reasons.append(f"波动压缩({volatility_20d:.1%})")
-
-        # ==================== 条件7：趋势启动确认 ====================
+        # ===== 6. 趋势启动 close>MA60 (0-10分) =====
         trend_strength = latest.get('trend_strength', 0)
-        if trend_strength <= 0:
-            return False, ["趋势指标未计算（数据不足）"]
-        if trend_strength <= 1.0:
-            return False, [f"趋势未转强 (收盘价 < MA{self.config.ma_long})"]
-        reasons.append(f"趋势启动({trend_strength:.1%})")
+        if trend_strength > 0:
+            if trend_strength > 1.0:
+                s = min(10, 10 * (trend_strength - 0.8) / 0.4)
+                score += s
+                passed_reasons.append(f"趋势启动({trend_strength:.1%})")
+                self._condition_stats['trend_start']['passed'] += 1
+            else:
+                s = max(0, 5 * (trend_strength - 0.9) / 0.1)
+                score += s
+                failed_reasons.append("趋势未启动(收盘<MA60)")
+                self._condition_stats['trend_start']['failed'] += 1
+        else:
+            self._condition_stats['trend_start']['failed'] += 1
 
-        return True, reasons
+        # ===== 7. 波动率 (0-5分) =====
+        if self.config.max_volatility_20d < 1.0 and len(df) >= 20:
+            vol_20d = self._calculate_volatility_20d(df)
+            if vol_20d <= self.config.max_volatility_20d:
+                score += 5
+                passed_reasons.append(f"波动压缩({vol_20d:.1%})")
+                self._condition_stats['volatility']['passed'] += 1
+            else:
+                # 略超也给部分分
+                s = max(0, 3 * (1 - (vol_20d - self.config.max_volatility_20d) / self.config.max_volatility_20d))
+                score += s
+                failed_reasons.append(f"波动偏高({vol_20d:.1%})")
+                self._condition_stats['volatility']['failed'] += 1
 
-    def _calculate_turnover_rate(self, latest: pd.Series, df: pd.DataFrame) -> float:
-        """
-        计算换手率
+        return score, passed_reasons, failed_reasons
 
-        Args:
-            latest: 最新一行数据
-            df: 完整的DataFrame
+    def get_filter_stats(self) -> Dict:
+        """获取过滤条件统计（用于诊断）"""
+        stats = dict(self._condition_stats)
+        # 按失败数排序，找出最严格的条件
+        sorted_stats = sorted(stats.items(), key=lambda x: x[1]['failed'], reverse=True)
+        return {
+            'total_evaluated': self._total_evaluated,
+            'conditions': OrderedDict(sorted_stats)
+        }
 
-        Returns:
-            换手率（使用成交量估算）
-        """
-        try:
-            # 使用当日成交量 / 流通市值估算换手率
-            volume = latest.get('volume', 0)
-            # 简化处理：假设平均流通股本，实际应从数据源获取
-            # 这里使用相对换手率 = 当日成交量 / 20日平均成交量
-            avg_volume_20d = df['volume'].tail(20).mean()
-            if avg_volume_20d > 0:
-                return volume / avg_volume_20d * 0.05  # 校准系数
-            return 0
-        except:
-            return 0
+    def format_filter_stats(self) -> str:
+        """格式化过滤统计为可读文本"""
+        stats = self.get_filter_stats()
+        if stats['total_evaluated'] == 0:
+            return "暂无统计数据"
+
+        name_map = {
+            'price_position': '价格位置',
+            'volume_expansion': '成交量放大',
+            'volume_trend': '均量趋势',
+            'volume_progressive': '量能递进',
+            'trend_filter': '趋势过滤(MA20>MA60)',
+            'trend_start': '趋势启动(close>MA60)',
+            'volatility': '波动率',
+        }
+
+        lines = [f"{'条件':<25} {'通过':>8} {'未通过':>8} {'通过率':>8}"]
+        lines.append("-" * 55)
+        for key, val in stats['conditions'].items():
+            name = name_map.get(key, key)
+            p, f = val['passed'], val['failed']
+            total = p + f
+            rate = f"{p/total*100:.1f}%" if total > 0 else "N/A"
+            lines.append(f"{name:<25} {p:>8} {f:>8} {rate:>8}")
+
+        lines.append(f"\n共评估 {stats['total_evaluated']} 只股票")
+        return "\n".join(lines)
 
     def _calculate_volatility_20d(self, df: pd.DataFrame) -> float:
-        """
-        计算20日振幅
-
-        Args:
-            df: 包含OHLC数据的DataFrame
-
-        Returns:
-            20日振幅（百分比）
-        """
+        """计算20日振幅"""
         try:
             df_20d = df.tail(20)
             high_20d = df_20d['high'].max()
             low_20d = df_20d['low'].min()
-
             if low_20d > 0:
                 return (high_20d - low_20d) / low_20d
             return 0
@@ -202,7 +269,7 @@ class SignalGenerator:
 
     def check_safety_conditions(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        检查安全条件（用于过滤高风险信号）
+        检查安全条件（用于标记高风险信号，不作为硬过滤）
 
         Args:
             df: 包含指标的DataFrame
@@ -218,7 +285,7 @@ class SignalGenerator:
         if rsi >= self.config.rsi_overbought:
             warnings.append(f"RSI超买({rsi:.1f})")
 
-        # 检查布林带位置（价格是否过度偏离中轨）
+        # 检查布林带位置
         boll_mid = latest.get('boll_mid', latest['close'])
         boll_upper = latest.get('boll_upper', latest['close'] * 1.1)
         boll_lower = latest.get('boll_lower', latest['close'] * 0.9)
@@ -237,51 +304,10 @@ class SignalGenerator:
         is_safe = len(warnings) == 0
         return is_safe, warnings
 
-    def calculate_score(self, df: pd.DataFrame, market_cap: Optional[float] = None) -> float:
-        """
-        计算股票综合得分
-
-        Args:
-            df: 包含指标的DataFrame
-            market_cap: 市值（亿元）
-
-        Returns:
-            综合得分 (0-100)
-        """
-        latest = df.iloc[-1]
-        score = 0
-
-        # 1. 位置得分 (0-30分)
-        price_position = latest.get('price_position', 0.5)
-        position_score = 30 * (1 - price_position / self.config.low_threshold)
-        score += max(0, min(30, position_score))
-
-        # 2. 放量得分 (0-40分)
-        volume_expansion = latest.get('volume_expansion', 0)
-        volume_trend = latest.get('volume_trend', 0)
-        expansion_score = 20 * min(2, volume_expansion / self.config.volume_ratio)
-        trend_score = 20 * min(1.5, volume_trend)
-        score += max(0, min(40, expansion_score + trend_score))
-
-        # 3. 趋势得分 (0-20分)
-        trend_strength = latest.get('trend_strength', 1.0)
-        trend_score = 20 * min(1.2, trend_strength - 0.8) / 0.4
-        score += max(0, min(20, trend_score))
-
-        # 4. 市值得分 (0-10分)
-        if market_cap is not None:
-            # 中小市值适当加分
-            if market_cap < 50:
-                score += 10
-            elif market_cap < 100:
-                score += 5
-
-        return min(100, score)
-
     def generate_signal(self, symbol: str, df: pd.DataFrame,
                        market_cap: Optional[float] = None) -> SignalResult:
         """
-        生成交易信号
+        生成交易信号（分级评分制）
 
         Args:
             symbol: 股票代码
@@ -306,30 +332,31 @@ class SignalGenerator:
         # 获取最新指标值
         indicators = self.indicator_calc.get_latest_signals(df)
 
-        # 检查基本条件
-        passed, reasons = self.check_basic_conditions(df)
+        # 分级评分评估（不再硬过滤）
+        score, passed_reasons, failed_reasons = self.evaluate_conditions(df)
 
-        if not passed:
-            return SignalResult(
-                symbol=symbol,
-                signal_type=SignalType.WAIT,
-                score=0,
-                reasons=reasons,
-                indicators=indicators,
-                market_cap=market_cap
-            )
+        # 市值偏好加分 (0-5分)
+        if market_cap is not None:
+            if market_cap < 50:
+                score += 5
+            elif market_cap < 100:
+                score += 3
 
-        # 检查安全条件
+        score = min(100, score)
+
+        # 检查安全条件（仅标记警告）
         is_safe, warnings = self.check_safety_conditions(df)
 
-        if not is_safe:
-            reasons.extend(warnings)
-
-        # 计算得分
-        score = self.calculate_score(df, market_cap)
-
         # 生成信号
-        signal_type = SignalType.BUY if score > self.config.buy_threshold else SignalType.WAIT
+        signal_type = SignalType.BUY if score >= self.config.buy_threshold else SignalType.WAIT
+
+        # 组合原因：BUY显示通过的项，WAIT显示失败项
+        if signal_type == SignalType.BUY:
+            reasons = passed_reasons
+            if warnings:
+                reasons.extend([f"[警告]{w}" for w in warnings])
+        else:
+            reasons = failed_reasons
 
         return SignalResult(
             symbol=symbol,

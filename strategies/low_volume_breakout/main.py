@@ -177,7 +177,9 @@ class LowVolumeBreakoutStrategy:
         if df.empty:
             return None
 
-        if len(df) < self.config.min_data_points:
+        # 数据量检查：需要至少60天用于计算MA60等基础指标
+        # （min_data_points用于250日高位等指标，不够时可用已有数据计算）
+        if len(df) < 60:
             return None
 
         # 获取市值
@@ -554,6 +556,12 @@ class LowVolumeBreakoutStrategy:
         output_text = self.format_output(results)
         print("\n" + output_text)
 
+        # 打印过滤条件诊断统计
+        print(f"\n{'='*60}")
+        print("【过滤条件诊断统计】")
+        print(self.signal_generator.format_filter_stats())
+        print(f"{'='*60}")
+
         # 打印输出路径
         print(f"\n✓ TXT: {output_results['txt']}")
         print(f"✓ CSV: {output_results['csv']}")
@@ -577,7 +585,7 @@ def parse_arguments():
     parser.add_argument('--max-cap', type=float, default=None,
                        help='最大市值（亿元），机构级默认300亿')
     parser.add_argument('--low-threshold', type=float, default=None,
-                       help='低位阈值（当前价格/730日最高价），机构级默认0.4')
+                       help='低位阈值（当前价格/N日最高价），默认0.6')
     parser.add_argument('--volume-ratio', type=float, default=None,
                        help='放量倍数（5日均量/20日均量），机构级默认2.0')
 
@@ -651,18 +659,18 @@ def main():
 
     # 根据模式选择配置
     if args.mode == 'retail':
-        # 散户版配置（默认关闭可选过滤，参数较宽松）
+        # 散户版配置（参数更宽松）
         config_kwargs = {
-            'min_market_cap': 20.0,
+            'min_market_cap': 10.0,
             'max_market_cap': 500.0,
-            'low_threshold': 0.6,
-            'volume_ratio': 1.5,
-            'require_trend_filter': False,         # 默认关闭，可通过--trend-filter启用
-            'require_volume_progressive': False,   # 默认关闭，可通过--volume-progressive启用
-            'min_turnover_rate': 0.005,            # 换手率要求 0.5%（机构版1%）
-            'max_volatility_20d': 0.50,            # 波动率限制 50%（机构版30%）
+            'low_threshold': 0.7,               # 更宽松：从高点跌30%即可
+            'volume_ratio': 1.2,                 # 更宽松：1.2倍放量即可
+            'require_trend_filter': False,       # 不要求MA20>MA60
+            'require_volume_progressive': False, # 不要求量能递进
+            'min_turnover_rate': 0,              # 不使用换手率过滤
+            'max_volatility_20d': 0.60,          # 波动率限制60%
         }
-        print("使用散户版策略配置（可选过滤条件默认关闭）")
+        print("使用散户版策略配置（参数较宽松）")
     else:
         # 机构级配置（默认）
         config_kwargs = {}
