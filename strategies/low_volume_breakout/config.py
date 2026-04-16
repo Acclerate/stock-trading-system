@@ -105,6 +105,7 @@ class StrategyConfig:
     skip_st: bool = True  # 剔除ST股
     skip_suspended: bool = True  # 剔除停牌股
     skip_chinext: bool = True  # 剔除创业板股票（300开头）
+    skip_star: bool = True  # 剔除科创板股票（688开头）
 
     # 并发参数
     max_workers: int = 8  # 并发处理线程数

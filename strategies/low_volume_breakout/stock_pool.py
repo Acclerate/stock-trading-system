@@ -102,6 +102,13 @@ class StockPoolManager:
                 valid_stocks = valid_stocks[~valid_stocks['symbol'].str.contains(r'SZSE\.30\d{3}')]
                 chinext_filtered = before_chinext_count - len(valid_stocks)
 
+            # 剔除科创板股票（代码以688开头，如SHSE.688xxx）
+            star_filtered = 0
+            if self.config.skip_star:
+                before_star_count = len(valid_stocks)
+                valid_stocks = valid_stocks[~valid_stocks['symbol'].str.contains(r'SHSE\.688\d{3}')]
+                star_filtered = before_star_count - len(valid_stocks)
+
             all_stocks = list(valid_stocks['symbol'])
 
             # 保存股票名称映射（使用symbol作为key，确保唯一性）
@@ -115,6 +122,8 @@ class StockPoolManager:
             filter_desc = f"(剔除次新股<{self.config.min_listing_days}天, 停牌={self.config.skip_suspended}, ST={self.config.skip_st}"
             if self.config.skip_chinext:
                 filter_desc += f", 创业板={chinext_filtered}"
+            if self.config.skip_star:
+                filter_desc += f", 科创板={star_filtered}"
             filter_desc += ")"
 
             print(f"可选股票池数量: {len(all_stocks)} {filter_desc}")
@@ -347,6 +356,8 @@ class StockPoolManager:
 
             if self.config.skip_chinext:
                 stock_info = stock_info[~stock_info['代码'].str.startswith('30')]
+
+            if self.config.skip_star:
                 stock_info = stock_info[~stock_info['代码'].str.startswith('688')]
 
             all_stocks = list(stock_info['symbol'])
@@ -407,6 +418,8 @@ class StockPoolManager:
 
             if self.config.skip_chinext:
                 df = df[~df['code'].str.startswith('sz.30')]
+
+            if self.config.skip_star:
                 df = df[~df['code'].str.startswith('sh.688')]
 
             all_stocks = list(df['symbol'])

@@ -624,6 +624,10 @@ def parse_arguments():
                        help='剔除创业板股票（默认启用）')
     parser.add_argument('--include-chinext', action='store_true', default=False,
                        help='包含创业板股票（使用此参数覆盖skip-chinext）')
+    parser.add_argument('--skip-star', action='store_true', default=True,
+                       help='剔除科创板股票（默认启用）')
+    parser.add_argument('--include-star', action='store_true', default=False,
+                       help='包含科创板股票（使用此参数覆盖skip-star）')
 
     # ==================== 策略模式选择 ====================
     parser.add_argument('--mode', type=str, choices=['retail', 'institutional'], default='retail',
@@ -676,8 +680,9 @@ def main():
         config_kwargs = {}
         print("使用机构级策略配置（参数严格，符合机构标准）")
 
-    # 处理创业板过滤参数
+    # 处理板块过滤参数
     skip_chinext = args.skip_chinext and not args.include_chinext
+    skip_star = args.skip_star and not args.include_star
 
     # 覆盖命令行参数
     if args.min_cap is not None:
@@ -713,6 +718,7 @@ def main():
     config = StrategyConfig(**config_kwargs)
     config.output_dir = args.output_dir
     config.skip_chinext = skip_chinext
+    config.skip_star = skip_star
 
     # 运行策略
     strategy = LowVolumeBreakoutStrategy(config)
